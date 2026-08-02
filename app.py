@@ -38,7 +38,7 @@ def extraer_num(val):
     try:
         cleaned = re.sub(r"[^\d.,-]", "", str(val)).replace(",", ".")
         return float(cleaned) if cleaned else 0.0
-    except:
+    except Exception:
         return 0.0
 
 
@@ -107,17 +107,9 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
         df_lista_n2 = cargar_pestaña("Listas_N2")
         df_lista_n3 = cargar_pestaña("Lista_N3")
 
-        # Identificación de Columna B (Código ERP) y A (Nombre) en Mermas_Costos
-        col_cod_mermas = [
-            c
-            for c in df_mermas.columns
-            if "CÓDIGO ERP" in c.upper() or "CODIGO ERP" in c.upper()
-        ]
-        col_cod_mermas = (
-            col_cod_mermas[0] if col_cod_mermas else df_mermas.columns[1]
-        )
-
+        # Asignación segura por índice (Col A: Nombre, Col B: Código ERP)
         col_nom_mermas = df_mermas.columns[0]
+        col_cod_mermas = df_mermas.columns[1]
 
         def buscar_col_costo(df):
             for c in df.columns:
@@ -127,7 +119,6 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
 
         df_mermas["COD_CLEAN"] = df_mermas[col_cod_mermas].apply(limpiar_codigo)
 
-        # Filtramos solo insumos que tengan código válido
         df_mermas_validos = df_mermas[df_mermas["COD_CLEAN"] != ""].copy()
         df_mermas_validos["COMBO_LABEL"] = (
             "["
@@ -170,7 +161,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
             with c3:
                 dif_precio = nuevo_precio - costo_actual
                 porc_inc = (
-                    (dif_precio / costo_actual * 100) if costo_actual > 0 else 0
+                    (dif_precio / costo_actual * 100) if costo_actual > 0 else 0.0
                 )
                 st.metric(
                     "Incremento Unitario Insumo",
@@ -180,11 +171,10 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
 
             st.divider()
 
-            # Normalizar Códigos en Tablas de Recetas y Listas
+            # Normalizar Tablas
             def preparar_df(df):
                 df_copy = df.copy()
                 df_copy.columns = [c.strip() for c in df_copy.columns]
-                # Col 0: Código Receta Padre, Col 1: Código Insumo Componente, Col 2: Cantidad
                 df_copy["RECETA_COD"] = df_copy.iloc[:, 0].apply(limpiar_codigo)
                 df_copy["INSUMO_COD"] = df_copy.iloc[:, 1].apply(limpiar_codigo)
                 return df_copy
@@ -196,18 +186,16 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
             def preparar_lista(df):
                 df_copy = df.copy()
                 df_copy.columns = [c.strip() for c in df_copy.columns]
-                # Col 0: Código, Col 1: Nombre, Col de Costo
                 df_copy["COD_KEY"] = df_copy.iloc[:, 0].apply(limpiar_codigo)
-                df_copy["COSTO_VAL"] = df_copy[buscar_col_costo(df_copy)].apply(
-                    extraer_num
-                )
+                col_c = buscar_col_costo(df_copy)
+                df_copy["COSTO_VAL"] = df_copy[col_c].apply(extraer_num)
                 return df_copy
 
             l1 = preparar_lista(df_lista_n1)
             l2 = preparar_lista(df_lista_n2)
             l3 = preparar_lista(df_lista_n3)
 
-            # --- EVALUACIÓN NIVEL N1 (Por Código) ---
+            # --- EVALUACIÓN NIVEL N1 ---
             impactos_n1 = {}
             filas_n1 = []
 
@@ -224,7 +212,6 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
 
                     impactos_n1[cod_rec] = inc_total
 
-                    # Costo base desde Lista_N1 cruzado por CÓDIGO
                     row_master = l1[l1["COD_KEY"] == cod_rec]
                     costo_base = (
                         row_master.iloc[0]["COSTO_VAL"]
@@ -237,6 +224,10 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                         else cod_rec
                     )
 
+                    porc_var = (
+                        (inc_total / costo_base * 100) if costo_base > 0 else 0.0
+                    )
+
                     filas_n1.append(
                         {
                             "Código Receta": cod_rec,
@@ -245,11 +236,11 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                             "Costo Actual Batch": f"Bs {costo_base:.2f}",
                             "Costo Simulado Batch": f"Bs {(costo_base + inc_total):.2f}",
                             "Variación (Bs)": f"+Bs {inc_total:.2f}",
-                            "Variación (%)": f"+{(inc_total / costo_base * 100 if costo_base > 0 else 0):.1f}%",
+                            "Variación (%)": f"+{porc_var:.1f}%",
                         }
                     )
 
-            # --- EVALUACIÓN NIVEL N2 (Por Código N1 o Código Insumo) ---
+            # --- EVALUACIÓN NIVEL N2 ---
             impactos_n2 = {}
             filas_n2 = []
 
@@ -274,7 +265,6 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 if inc_total > 0:
                     impactos_n2[cod_rec] = inc_total
 
-                    # Costo base desde Listas_N2 cruzado por CÓDIGO
                     row_master = l2[l2["COD_KEY"] == cod_rec]
                     costo_base = (
                         row_master.iloc[0]["COSTO_VAL"]
@@ -287,6 +277,10 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                         else cod_rec
                     )
 
+                    porc_var = (
+                        (inc_total / costo_base * 100) if costo_base > 0 else 0.0
+                    )
+
                     filas_n2.append(
                         {
                             "Código Receta N2": cod_rec,
@@ -295,11 +289,11 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                             "Costo Actual Batch": f"Bs {costo_base:.2f}",
                             "Costo Simulado Batch": f"Bs {(costo_base + inc_total):.2f}",
                             "Variación (Bs)": f"+Bs {inc_total:.2f}",
-                            "Variación (%)": f"+{(inc_total / costo_base * 100 if costo_base > 0 else 0):.1f}%",
+                            "Variación (%)": f"+{porc_var:.1f}%",
                         }
                     )
 
-            # --- EVALUACIÓN NIVEL N3 (Por Código N2, N1 o Insumo) ---
+            # --- EVALUACIÓN NIVEL N3 ---
             filas_n3 = []
 
             for cod_rec, group in r3.groupby("RECETA_COD"):
@@ -324,7 +318,6 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                         cant_usada += cant
 
                 if inc_total > 0:
-                    # Costo base desde Lista_N3 cruzado por CÓDIGO
                     row_master = l3[l3["COD_KEY"] == cod_rec]
                     costo_base = (
                         row_master.iloc[0]["COSTO_VAL"]
@@ -337,6 +330,10 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                         else cod_rec
                     )
 
+                    porc_var = (
+                        (inc_total / costo_base * 100) if costo_base > 0 else 0.0
+                    )
+
                     filas_n3.append(
                         {
                             "Código Producto N3": cod_rec,
@@ -345,7 +342,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                             "Costo Actual": f"Bs {costo_base:.2f}",
                             "Costo Simulado": f"Bs {(costo_base + inc_total):.2f}",
                             "Variación (Bs)": f"+Bs {inc_total:.2f}",
-                            "Variación (%)": f"+{(inc_total / costo_base * 100 if costo_base > 0 else 0):.1f}%",
+                            "Variación (%)": f"+{porc_var:.1f}%",
                         }
                     )
 
@@ -369,23 +366,26 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 st.write(
                     f"**Productos Finales N3 Afectados:** {len(resumen_l3)}"
                 )
-                st.dataframe(
-                    resumen_l3, use_container_width=True
-                ) if not resumen_l3.empty else st.info("Sin registros N3.")
+                if not resumen_l3.empty:
+                    st.dataframe(resumen_l3, use_container_width=True)
+                else:
+                    st.info("Sin registros N3.")
 
             with t2:
                 st.write(
                     f"**Productos Intermedios N2 Afectados:** {len(resumen_l2)}"
                 )
-                st.dataframe(
-                    resumen_l2, use_container_width=True
-                ) if not resumen_l2.empty else st.info("Sin registros N2.")
+                if not resumen_l2.empty:
+                    st.dataframe(resumen_l2, use_container_width=True)
+                else:
+                    st.info("Sin registros N2.")
 
             with t3:
                 st.write(f"**Sub-Recetas N1 Afectadas:** {len(resumen_l1)}")
-                st.dataframe(
-                    resumen_l1, use_container_width=True
-                ) if not resumen_l1.empty else st.info("Sin registros N1.")
+                if not resumen_l1.empty:
+                    st.dataframe(resumen_l1, use_container_width=True)
+                else:
+                    st.info("Sin registros N1.")
 
     except Exception as e:
         st.error(f"Error en simulación: {e}")
