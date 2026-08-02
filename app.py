@@ -2,17 +2,31 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
+# Configuración inicial de la página
+st.set_page_config(
+    page_title="Recetario Inteligente",
+    page_icon="🍰",
+    layout="wide"
+)
+
+st.title("🍰 Recetario Inteligente y Simulación de Costos")
+
+# --- FUNCIONES DE CÁLCULO ---
+
 def calcular_pesos_totales_n3(df_recetas_n3):
-    """Suma dinámicamente el peso de los ingredientes comestibles por producto."""
+    """
+    Suma dinámicamente el peso de todos los INGREDIENTES comestibles por producto,
+    ignorando por completo los 'Empaque' / Packaging.
+    """
+    if df_recetas_n3.empty:
+        return {}
+        
     df_ing = df_recetas_n3.copy()
-    # Limpiar espacios en nombres de columnas
     df_ing.columns = df_ing.columns.str.strip()
     
-    # Filtrar solo 'Ingrediente'
     if 'Categoria' in df_ing.columns:
         df_ing = df_ing[df_ing['Categoria'].astype(str).str.strip() == 'Ingrediente']
     
-    # Convertir cantidades a número
     for col in ['Cantidad MP', 'Cantidad N1', 'Cantidad N2']:
         if col in df_ing.columns:
             df_ing[col] = pd.to_numeric(df_ing[col], errors='coerce').fillna(0.0)
@@ -26,11 +40,14 @@ def calcular_pesos_totales_n3(df_recetas_n3):
 
 
 def construir_tabla_ejecutiva(df_lista3, df_recetas_n3, elemento_afectado, incremento_base_bs):
+    """
+    Genera la tabla ejecutiva comparativa en Streamlit.
+    Calcula automáticamente si el ítem es Ingrediente o Empaque.
+    """
     if df_lista3.empty or df_recetas_n3.empty or not elemento_afectado:
         st.warning("⚠️ Selecciona un insumo para ver la simulación.")
         return pd.DataFrame()
 
-    # Normalizar espacios en nombres de columnas
     df_lista3 = df_lista3.copy()
     df_recetas_n3 = df_recetas_n3.copy()
     df_lista3.columns = df_lista3.columns.str.strip()
@@ -69,7 +86,6 @@ def construir_tabla_ejecutiva(df_lista3, df_recetas_n3, elemento_afectado, incre
             cant_n1 = pd.to_numeric(f.get('Cantidad N1', 0), errors='coerce') or 0.0
             cant_n2 = pd.to_numeric(f.get('Cantidad N2', 0), errors='coerce') or 0.0
 
-            # Coincidencias flexibles
             coincide_mp = elemento_afectado_str in str(f.get('Materia Prima', '')).strip().lower()
             coincide_cod = elemento_afectado_str == str(f.get('Código ERP', '')).strip().lower()
             coincide_n1 = elemento_afectado_str in str(f.get('Recetas N1', '')).strip().lower()
@@ -105,8 +121,54 @@ def construir_tabla_ejecutiva(df_lista3, df_recetas_n3, elemento_afectado, incre
             })
 
     res_df = pd.DataFrame(filas_resumen)
-    
-    if res_df.empty:
-        st.info("ℹ️ No se encontraron productos en Lista_N3 que utilicen directamente este insumo o subreceta en su receta final.")
-    
     return res_df
+
+
+# --- CARGA DE DATOS ---
+@st.cache_data
+def cargar_datos():
+    try:
+        df_l3 = pd.read_csv("Recetario_Automatizado_Lista_N3.csv")
+        df_r3 = pd.read_csv("Recetario_Automatizado_Recetas_N3.csv")
+        df_mermas = pd.read_csv("Recetario_Automatizado_Mermas_Costos.csv")
+        return df_l3, df_r3, df_mermas
+    except Exception as e:
+        st.error(f"Error al cargar los archivos CSV: {e}")
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+df_l3, df_r3, df_mermas = cargar_datos()
+
+# --- INTERFAZ USUARIO ---
+if not df_mermas.empty and not df_l3.empty:
+    st.subheader("📊 Simulación Ejecutiva de Costos")
+
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Obtener lista única de insumos de Mermas_Costos
+        col_insumo = 'Insumo Recetario' if 'Insumo Recetario' in df_mermas.columns else df_mermas.columns[0]
+        lista_insumos = sorted(df_mermas[col_insumo].dropna().astype(str).unique())
+        
+        insumo_seleccionado = st.selectbox(
+            "Selecciona el insumo o empaque a simular:",
+            options=[""] + lista_insumos
+        )
+
+    with col2:
+        incremento = st.number_input(
+            "Incremento en el costo base (Bs):",
+            min_value=0.0,
+            value=10.0,
+            step=1.0
+        )
+
+    if insumo_seleccionado:
+        tabla_simulada = construir_tabla_ejecutiva(df_l3, df_r3, insumo_seleccionado, incremento)
+        
+        if not tabla_simulada.empty:
+            st.success(f"Se encontraron {len(tabla_simulada)} productos/subrecetas afectados por '{insumo_seleccionado}'.")
+            st.dataframe(tabla_simulada)
+        else:
+            st.info("ℹ️ No se encontraron recetas directas afectadas por este insumo.")
+else:
+    st.info("Cargando base de datos...")
