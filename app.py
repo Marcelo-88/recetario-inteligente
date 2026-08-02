@@ -3,7 +3,7 @@ import pandas as pd
 import streamlit as st
 
 # ==========================================
-# 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS
+# 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS FRIDOLIN
 # ==========================================
 st.set_page_config(
     page_title="Fridolin | Centro de Control",
@@ -72,8 +72,8 @@ st.markdown(CSS_FRIDOLIN, unsafe_allow_html=True)
 st.markdown(
     """
     <div class="header-fridolin">
-        <h1>Fridolin • Centro de Control & Simulación Multinivel</h1>
-        <p>Gestión Inteligente de Recetas N1, N2 y N3 • Análisis de Impacto Financiero</p>
+        <h1>Fridolin • Centro de Control & Simulación Financiera</h1>
+        <p>Gestión Inteligente de Recetas • Análisis de Impacto Financiero</p>
     </div>
 """,
     unsafe_allow_html=True,
@@ -106,11 +106,6 @@ def normalizar_texto(val):
         return ""
     return str(val).strip()
 
-def normalizar_codigo(val):
-    if pd.isna(val):
-        return ""
-    return str(val).strip().upper()
-
 def buscar_valor_columna(df_row, lista_palabras_clave):
     for col in df_row.index:
         col_upper = str(col).strip().upper()
@@ -128,18 +123,165 @@ st.sidebar.markdown("### 🥧 Menú Principal")
 modo_app = st.sidebar.radio(
     "Selecciona la función:",
     [
+        "🍰 Simulación Financiera Proporcional",
         "📋 Ficha Técnica de Producto (N3)",
         "📊 Control de Márgenes y Estados (N3)",
-        "🍰 Simulación Financiera Multinivel",
         "📖 Explorador de Tablas",
     ],
 )
 st.sidebar.divider()
 
 # ------------------------------------------
-# MODO 1: FICHA TÉCNICA DE PRODUCTO (N3)
+# MODO 1: SIMULACIÓN FINANCIERA (VERSIÓN ORIGINAL QUE SÍ FUNCIONABA)
 # ------------------------------------------
-if modo_app == "📋 Ficha Técnica de Producto (N3)":
+if modo_app == "🍰 Simulación Financiera Proporcional":
+    st.markdown("## 🍰 Simulación Financiera Proporcional")
+    st.caption("Ajusta el precio de un insumo base para evaluar el impacto directo en productos N3.")
+
+    try:
+        df_mermas = cargar_pestaña("Mermas_Costos")
+        col_nom_m = df_mermas.columns[0]
+        col_cod_m = df_mermas.columns[1] if len(df_mermas.columns) > 1 else col_nom_m
+
+        df_mermas["COMBO_LABEL"] = (
+            "[" + df_mermas[col_cod_m].astype(str).str.strip() + "] " + df_mermas[col_nom_m].astype(str).str.strip()
+        )
+        lista_opciones = sorted([op for op in df_mermas["COMBO_LABEL"].unique() if len(op) > 3])
+
+        st.subheader("1️⃣ Selecciona el Insumo a Simular")
+        opcion_elegida = st.selectbox("Buscar por Código ERP o Nombre de Insumo:", lista_opciones)
+
+        if opcion_elegida:
+            datos_insumo = df_mermas[df_mermas["COMBO_LABEL"] == opcion_elegida].iloc[0]
+            articulo_mostrar = normalizar_texto(datos_insumo[col_nom_m])
+            codigo_target = normalizar_texto(datos_insumo[col_cod_m])
+
+            # Extraer costo base del insumo
+            costo_actual_unitario = buscar_valor_columna(
+                datos_insumo, ["Costo", "Precio", "P.U", "Unitario", "Valor", "Costo/Lt", "Costo/Kg"]
+            )
+            if costo_actual_unitario == 0.0:
+                for col in datos_insumo.index:
+                    if col not in ["COMBO_LABEL", col_nom_m, col_cod_m]:
+                        val_n = extraer_num(datos_insumo[col])
+                        if val_n > 0:
+                            costo_actual_unitario = val_n
+                            break
+
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.metric("Precio Actual Base", f"Bs {costo_actual_unitario:.2f}")
+                st.caption(f"**Insumo:** [{codigo_target}] {articulo_mostrar}")
+            with c2:
+                nuevo_precio_unitario = st.number_input(
+                    "Nuevo precio simulado por Lt/Kg (Bs):",
+                    min_value=0.0,
+                    value=float(costo_actual_unitario),
+                    step=0.50,
+                )
+            with c3:
+                dif_precio_unitario = nuevo_precio_unitario - costo_actual_unitario
+                porc_inc = ((dif_precio_unitario / costo_actual_unitario) * 100) if costo_actual_unitario > 0 else 0.0
+                st.metric("Variación Directa", f"+Bs {dif_precio_unitario:.2f}", delta=f"{porc_inc:.1f}%")
+
+            st.divider()
+            st.subheader("2️⃣ Impacto Directo en Recetas (N3)")
+
+            if abs(dif_precio_unitario) < 0.001:
+                st.info("💡 Incrementa el **'Nuevo precio simulado'** arriba para ver la recalculación de costos en productos N3.")
+            else:
+                df_recetas_n3 = cargar_pestaña("Recetas_N3")
+                df_lista_n3 = cargar_pestaña("Lista_N3")
+
+                # Limpieza para coincidencia perfecta
+                cod_target_clean = codigo_target.upper().strip()
+                nom_target_clean = articulo_mostrar.upper().strip()
+
+                # Mapa de consumo por producto final N3
+                consumo_por_producto = {}
+
+                col_nom_receta = df_recetas_n3.columns[0]
+                col_nom_insumo = df_recetas_n3.columns[1] if len(df_recetas_n3.columns) > 1 else ""
+                col_cod_insumo = df_recetas_n3.columns[2] if len(df_recetas_n3.columns) > 2 else ""
+                col_cant_insumo = df_recetas_n3.columns[4] if len(df_recetas_n3.columns) > 4 else ""
+
+                for _, r in df_recetas_n3.iterrows():
+                    p_nombre = normalizar_texto(r[col_nom_receta])
+                    ins_nombre = normalizar_texto(r[col_nom_insumo]).upper() if col_nom_insumo else ""
+                    ins_codigo = normalizar_texto(r[col_cod_insumo]).upper() if col_cod_insumo else ""
+                    cant = extraer_num(r[col_cant_insumo]) if col_cant_insumo else 0.0
+
+                    # Coincidencia directa por código o nombre
+                    es_coincidencia = False
+                    if cod_target_clean and cod_target_clean == ins_codigo:
+                        es_coincidencia = True
+                    elif nom_target_clean and nom_target_clean in ins_nombre:
+                        es_coincidencia = True
+
+                    if es_coincidencia and p_nombre and cant > 0:
+                        consumo_por_producto[p_nombre] = consumo_por_producto.get(p_nombre, 0.0) + cant
+
+                # Cruzar con Lista_N3 para calcular costos y márgenes finales
+                filas_resultado = []
+                col_nom_l3 = df_lista_n3.columns[0]
+                col_cod_l3 = df_lista_n3.columns[1] if len(df_lista_n3.columns) > 1 else col_nom_l3
+
+                for _, r in df_lista_n3.iterrows():
+                    nom_prod = normalizar_texto(r[col_nom_l3])
+                    cod_prod = normalizar_texto(r[col_cod_l3])
+
+                    if nom_prod in consumo_por_producto:
+                        cant_usada = consumo_por_producto[nom_prod]
+                        incremento_costo = cant_usada * dif_precio_unitario
+
+                        costo_orig = buscar_valor_columna(r, ["Costo Total N3", "Costo R3", "Costo Total", "Costo"])
+                        pv1 = buscar_valor_columna(r, ["Precio Venta 1", "PV1", "Precio 1"])
+                        pv2 = buscar_valor_columna(r, ["Precio Venta 2", "PV2", "Precio 2"])
+
+                        costo_simulado = costo_orig + incremento_costo
+
+                        m1_orig = ((pv1 - costo_orig) / pv1 * 100) if pv1 > 0 else 0.0
+                        m1_sim = ((pv1 - costo_simulado) / pv1 * 100) if pv1 > 0 else 0.0
+
+                        m2_orig = ((pv2 - costo_orig) / pv2 * 100) if pv2 > 0 else 0.0
+                        m2_sim = ((pv2 - costo_simulado) / pv2 * 100) if pv2 > 0 else 0.0
+
+                        filas_resultado.append({
+                            "Código ERP": cod_prod,
+                            "Producto Terminado (N3)": nom_prod,
+                            "Cant. Usada": cant_usada,
+                            "Costo Orig. (Bs)": costo_orig,
+                            "Costo Simul. (Bs)": costo_simulado,
+                            "Incremento (Bs)": incremento_costo,
+                            "Margen PV1 (Orig)": f"{m1_orig:.1f}%",
+                            "Margen PV1 (Simul)": f"{m1_sim:.1f}%",
+                            "Margen PV2 (Orig)": f"{m2_orig:.1f}%",
+                            "Margen PV2 (Simul)": f"{m2_sim:.1f}%",
+                        })
+
+                if filas_resultado:
+                    df_res = pd.DataFrame(filas_resultado)
+                    st.success(f"🎯 Se encontraron **{len(df_res)}** Productos Terminados (N3) directamente afectados por este insumo:")
+                    st.dataframe(
+                        df_res.style.format({
+                            "Cant. Usada": "{:.3f}",
+                            "Costo Orig. (Bs)": "{:.2f} Bs",
+                            "Costo Simul. (Bs)": "{:.2f} Bs",
+                            "Incremento (Bs)": "+{:.2f} Bs",
+                        }),
+                        use_container_width=True,
+                        height=500,
+                    )
+                else:
+                    st.warning("No se encontraron productos en 'Recetas_N3' que usen directamente este insumo.")
+
+    except Exception as e:
+        st.error(f"Error en la pantalla de simulación: {e}")
+
+# ------------------------------------------
+# MODO 2: FICHA TÉCNICA DE PRODUCTO (N3)
+# ------------------------------------------
+elif modo_app == "📋 Ficha Técnica de Producto (N3)":
     st.markdown("## 📋 Ficha Técnica Interactiva de Producto Terminado")
     st.caption("Consulta el costo, precios de venta, márgenes y desglosa la estructura multinivel de recetas.")
 
@@ -198,21 +340,21 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
                     st.metric("Precio Venta 3", "No Aplica")
 
             st.divider()
-            st.markdown("##### 🌳 Estructura Multinivel Desglosada")
+            st.markdown("##### 🌳 Estructura de Receta")
 
             col_receta_padre = df_recetas_n3.columns[0]
             sub_df = df_recetas_n3[df_recetas_n3[col_receta_padre].astype(str).str.strip().str.upper() == nombre_producto.upper()]
 
-            if sub_df.empty:
+            if sub_df.empty and len(df_recetas_n3.columns) > 2:
                 sub_df = df_recetas_n3[df_recetas_n3.iloc[:, 2].astype(str).str.strip().str.upper() == codigo_producto.upper()]
 
             if not sub_df.empty:
                 mp_rows = []
                 for _, row in sub_df.iterrows():
                     nom_mp = normalizar_texto(row.iloc[1])
-                    cod_mp = normalizar_texto(row.iloc[2])
-                    cat_mp = normalizar_texto(row.iloc[3])
-                    cant_mp = extraer_num(row.iloc[4])
+                    cod_mp = normalizar_texto(row.iloc[2]) if len(row) > 2 else "-"
+                    cat_mp = normalizar_texto(row.iloc[3]) if len(row) > 3 else "-"
+                    cant_mp = extraer_num(row.iloc[4]) if len(row) > 4 else 0.0
                     unid_mp = normalizar_texto(row.iloc[5]) if len(row) > 5 else "Kg/U"
 
                     if nom_mp and nom_mp not in ["NO SE ENCONTRO", "NADA", "-"]:
@@ -225,69 +367,15 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
                         })
 
                 df_mp_final = pd.DataFrame(mp_rows).drop_duplicates()
-
-                n1_rows = []
-                for _, row in sub_df.iterrows():
-                    if len(row) > 9:
-                        nom_n1 = normalizar_texto(row.iloc[6])
-                        cod_n1 = normalizar_texto(row.iloc[7])
-                        cant_n1 = extraer_num(row.iloc[8])
-                        unid_n1 = normalizar_texto(row.iloc[9])
-
-                        if nom_n1 and cant_n1 > 0 and nom_n1 not in ["NO SE ENCONTRO", "NADA", "-"]:
-                            n1_rows.append({
-                                "Código Sub-Receta": cod_n1 if cod_n1 else "-",
-                                "Nombre Sub-Receta (N1)": nom_n1,
-                                "Cantidad": cant_n1,
-                                "Unidad": unid_n1
-                            })
-
-                df_n1_final = pd.DataFrame(n1_rows).drop_duplicates()
-
-                n2_rows = []
-                for _, row in sub_df.iterrows():
-                    if len(row) > 13:
-                        nom_n2 = normalizar_texto(row.iloc[10])
-                        cod_n2 = normalizar_texto(row.iloc[11])
-                        cant_n2 = extraer_num(row.iloc[12])
-                        unid_n2 = normalizar_texto(row.iloc[13])
-
-                        if nom_n2 and cant_n2 > 0 and nom_n2 not in ["NO SE ENCONTRO", "NADA", "-"]:
-                            n2_rows.append({
-                                "Código Sub-Receta": cod_n2 if cod_n2 else "-",
-                                "Nombre Intermedio / Relleno (N2)": nom_n2,
-                                "Cantidad": cant_n2,
-                                "Unidad": unid_n2
-                            })
-
-                df_n2_final = pd.DataFrame(n2_rows).drop_duplicates()
-
-                with st.expander(f"🔹 **Materia Prima Directa** ({len(df_mp_final)} insumos)", expanded=True):
-                    if not df_mp_final.empty:
-                        st.dataframe(df_mp_final, use_container_width=True)
-                    else:
-                        st.info("Esta receta no requiere materia prima directa.")
-
-                with st.expander(f"🔴 **Recetas N1 - Pre-elaborados / Base** ({len(df_n1_final)} sub-recetas)", expanded=True):
-                    if not df_n1_final.empty:
-                        st.dataframe(df_n1_final, use_container_width=True)
-                    else:
-                        st.caption("Esta receta no incluye sub-recetas de Nivel 1.")
-
-                with st.expander(f"🟠 **Recetas N2 - Intermedios / Rellenos** ({len(df_n2_final)} sub-recetas)", expanded=True):
-                    if not df_n2_final.empty:
-                        st.dataframe(df_n2_final, use_container_width=True)
-                    else:
-                        st.caption("Esta receta no incluye sub-recetas de Nivel 2.")
-
+                st.dataframe(df_mp_final, use_container_width=True)
             else:
-                st.warning("No se encontraron registros detallados para este producto en la pestaña 'Recetas_N3'.")
+                st.warning("No se encontraron registros detallados para este producto en 'Recetas_N3'.")
 
     except Exception as e:
         st.error(f"Error al procesar la Ficha Técnica: {e}")
 
 # ------------------------------------------
-# MODO 2: CONTROL DE MÁRGENES Y ESTADOS (N3)
+# MODO 3: CONTROL DE MÁRGENES Y ESTADOS (N3)
 # ------------------------------------------
 elif modo_app == "📊 Control de Márgenes y Estados (N3)":
     st.markdown("## 📊 Tablero de Control de Márgenes por Estado")
@@ -399,186 +487,6 @@ elif modo_app == "📊 Control de Márgenes y Estados (N3)":
 
     except Exception as e:
         st.error(f"Error al cargar el Control de Márgenes: {e}")
-
-# ------------------------------------------
-# MODO 3: SIMULACIÓN FINANCIERA MULTINIVEL (RESTAURADO Y BLINDADO)
-# ------------------------------------------
-elif modo_app == "🍰 Simulación Financiera Multinivel":
-    st.markdown("## 🍰 Simulación Financiera Proporcional")
-    st.caption("Ajusta el precio de un insumo base para evaluar el impacto en N1, N2 y el producto final N3.")
-
-    try:
-        df_mermas = cargar_pestaña("Mermas_Costos")
-        col_nom_m = df_mermas.columns[0]
-        col_cod_m = df_mermas.columns[1] if len(df_mermas.columns) > 1 else col_nom_m
-
-        df_mermas["COMBO_LABEL"] = (
-            "[" + df_mermas[col_cod_m].astype(str).str.strip() + "] " + df_mermas[col_nom_m].astype(str).str.strip()
-        )
-        lista_opciones = sorted([op for op in df_mermas["COMBO_LABEL"].unique() if len(op) > 3])
-
-        st.subheader("1️⃣ Selecciona el Insumo a Simular")
-        opcion_elegida = st.selectbox("Buscar por Código ERP o Nombre de Insumo:", lista_opciones)
-
-        if opcion_elegida:
-            datos_insumo = df_mermas[df_mermas["COMBO_LABEL"] == opcion_elegida].iloc[0]
-            articulo_mostrar = normalizar_texto(datos_insumo[col_nom_m])
-            codigo_target_raw = normalizar_codigo(datos_insumo[col_cod_m])
-
-            # Extraer costo base real del insumo desde Mermas_Costos
-            costo_actual_unitario = buscar_valor_columna(
-                datos_insumo, ["Costo", "Precio", "P.U", "Unitario", "Valor", "Costo/Lt", "Costo/Kg"]
-            )
-            if costo_actual_unitario == 0.0:
-                for col in datos_insumo.index:
-                    if col not in ["COMBO_LABEL", col_nom_m, col_cod_m]:
-                        val_n = extraer_num(datos_insumo[col])
-                        if val_n > 0:
-                            costo_actual_unitario = val_n
-                            break
-
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.metric("Precio Actual Base", f"Bs {costo_actual_unitario:.2f}")
-                st.caption(f"**Insumo:** [{codigo_target_raw}] {articulo_mostrar}")
-            with c2:
-                nuevo_precio_unitario = st.number_input(
-                    "Nuevo precio simulado por Lt/Kg (Bs):",
-                    min_value=0.0,
-                    value=float(costo_actual_unitario),
-                    step=0.50,
-                )
-            with c3:
-                dif_precio_unitario = nuevo_precio_unitario - costo_actual_unitario
-                porc_inc = ((dif_precio_unitario / costo_actual_unitario) * 100) if costo_actual_unitario > 0 else 0.0
-                st.metric("Variación Directa", f"+Bs {dif_precio_unitario:.2f}", delta=f"{porc_inc:.1f}%")
-
-            st.divider()
-            st.subheader("2️⃣ Impacto en Cascada en Recetas (N1, N2 y N3)")
-
-            if abs(dif_precio_unitario) < 0.001:
-                st.info("💡 Incrementa el **'Nuevo precio simulado'** arriba (por ejemplo a 25.00) para ver la cascada de recalculación en productos N3.")
-            else:
-                # Cargar tablas para el cálculo multinivel
-                df_recetas_n1 = cargar_pestaña("Recetas_N1")
-                df_recetas_n2 = cargar_pestaña("Recetas_N2")
-                df_recetas_n3 = cargar_pestaña("Recetas_N3")
-                df_lista_n3 = cargar_pestaña("Lista_N3")
-
-                target_code = codigo_target_raw
-                target_name = articulo_mostrar.upper()
-
-                # 1. EVOLUCIÓN N1
-                impacto_n1 = {}
-                if not df_recetas_n1.empty:
-                    for _, r in df_recetas_n1.iterrows():
-                        nom_rec_n1 = normalizar_texto(r.iloc[0]).upper()
-                        nom_mp = normalizar_texto(r.iloc[1]).upper() if len(r) > 1 else ""
-                        cod_mp = normalizar_codigo(r.iloc[2]) if len(r) > 2 else ""
-
-                        es_coincidencia = (target_code != "" and cod_mp == target_code) or (target_name != "" and target_name in nom_mp)
-                        if es_coincidencia:
-                            cant = extraer_num(r.iloc[4]) if len(r) > 4 else 0.0
-                            costo_adic = cant * dif_precio_unitario
-                            impacto_n1[nom_rec_n1] = impacto_n1.get(nom_rec_n1, 0.0) + costo_adic
-
-                # 2. EVOLUCIÓN N2
-                impacto_n2 = {}
-                if not df_recetas_n2.empty:
-                    for _, r in df_recetas_n2.iterrows():
-                        nom_rec_n2 = normalizar_texto(r.iloc[0]).upper()
-                        nom_mp = normalizar_texto(r.iloc[1]).upper() if len(r) > 1 else ""
-                        cod_mp = normalizar_codigo(r.iloc[2]) if len(r) > 2 else ""
-
-                        es_coincidencia = (target_code != "" and cod_mp == target_code) or (target_name != "" and target_name in nom_mp)
-                        if es_coincidencia:
-                            cant = extraer_num(r.iloc[4]) if len(r) > 4 else 0.0
-                            costo_adic = cant * dif_precio_unitario
-                            impacto_n2[nom_rec_n2] = impacto_n2.get(nom_rec_n2, 0.0) + costo_adic
-
-                        # Vía N1
-                        nom_sub_n1 = normalizar_texto(r.iloc[6]).upper() if len(r) > 6 else ""
-                        if nom_sub_n1 in impacto_n1:
-                            cant_sub_n1 = extraer_num(r.iloc[8]) if len(r) > 8 else 0.0
-                            impacto_n2[nom_rec_n2] = impacto_n2.get(nom_rec_n2, 0.0) + (cant_sub_n1 * impacto_n1[nom_sub_n1])
-
-                # 3. EVOLUCIÓN N3
-                impacto_n3 = {}
-                if not df_recetas_n3.empty:
-                    for _, r in df_recetas_n3.iterrows():
-                        nom_rec_n3 = normalizar_texto(r.iloc[0]).upper()
-                        nom_mp = normalizar_texto(r.iloc[1]).upper() if len(r) > 1 else ""
-                        cod_mp = normalizar_codigo(r.iloc[2]) if len(r) > 2 else ""
-
-                        # Directo MP
-                        es_coincidencia = (target_code != "" and cod_mp == target_code) or (target_name != "" and target_name in nom_mp)
-                        if es_coincidencia:
-                            cant = extraer_num(r.iloc[4]) if len(r) > 4 else 0.0
-                            costo_adic = cant * dif_precio_unitario
-                            impacto_n3[nom_rec_n3] = impacto_n3.get(nom_rec_n3, 0.0) + costo_adic
-
-                        # Vía N1
-                        nom_sub_n1 = normalizar_texto(r.iloc[6]).upper() if len(r) > 6 else ""
-                        if nom_sub_n1 in impacto_n1:
-                            cant_sub_n1 = extraer_num(r.iloc[8]) if len(r) > 8 else 0.0
-                            impacto_n3[nom_rec_n3] = impacto_n3.get(nom_rec_n3, 0.0) + (cant_sub_n1 * impacto_n1[nom_sub_n1])
-
-                        # Vía N2
-                        nom_sub_n2 = normalizar_texto(r.iloc[10]).upper() if len(r) > 10 else ""
-                        if nom_sub_n2 in impacto_n2:
-                            cant_sub_n2 = extraer_num(r.iloc[12]) if len(r) > 12 else 0.0
-                            impacto_n3[nom_rec_n3] = impacto_n3.get(nom_rec_n3, 0.0) + (cant_sub_n2 * impacto_n2[nom_sub_n2])
-
-                # CONSTRUIR TABLA DE PRODUCTOS AFECTADOS
-                filas_afectadas = []
-                for _, r in df_lista_n3.iterrows():
-                    nom_p = normalizar_texto(r.iloc[0])
-                    nom_p_key = nom_p.upper()
-                    
-                    if nom_p_key in impacto_n3 and impacto_n3[nom_p_key] > 0:
-                        cod_p = normalizar_texto(r.iloc[1]) if len(r) > 1 else "-"
-                        costo_orig = buscar_valor_columna(r, ["Costo Total N3", "Costo R3", "Costo Total", "Costo"])
-                        pv1 = buscar_valor_columna(r, ["Precio Venta 1", "PV1", "Precio 1"])
-                        pv2 = buscar_valor_columna(r, ["Precio Venta 2", "PV2", "Precio 2"])
-
-                        costo_simulado = costo_orig + impacto_n3[nom_p_key]
-                        
-                        m1_orig = ((pv1 - costo_orig) / pv1 * 100) if pv1 > 0 else 0
-                        m1_sim = ((pv1 - costo_simulado) / pv1 * 100) if pv1 > 0 else 0
-
-                        m2_orig = ((pv2 - costo_orig) / pv2 * 100) if pv2 > 0 else 0
-                        m2_sim = ((pv2 - costo_simulado) / pv2 * 100) if pv2 > 0 else 0
-
-                        filas_afectadas.append({
-                            "Código ERP": cod_p,
-                            "Producto Terminado (N3)": nom_p,
-                            "Costo Orig. (Bs)": costo_orig,
-                            "Costo Simul. (Bs)": costo_simulado,
-                            "Incremento (Bs)": impacto_n3[nom_p_key],
-                            "Margen PV1 (Orig)": f"{m1_orig:.1f}%",
-                            "Margen PV1 (Simul)": f"{m1_sim:.1f}%",
-                            "Margen PV2 (Orig)": f"{m2_orig:.1f}%",
-                            "Margen PV2 (Simul)": f"{m2_sim:.1f}%",
-                        })
-
-                if filas_afectadas:
-                    df_res_sim = pd.DataFrame(filas_afectadas)
-                    st.success(f"🎯 Se encontraron **{len(df_res_sim)}** Productos Terminados (N3) afectados por la variación de este insumo:")
-                    
-                    st.dataframe(
-                        df_res_sim.style.format({
-                            "Costo Orig. (Bs)": "{:.2f} Bs",
-                            "Costo Simul. (Bs)": "{:.2f} Bs",
-                            "Incremento (Bs)": "+{:.2f} Bs",
-                        }),
-                        use_container_width=True,
-                        height=450
-                    )
-                else:
-                    st.warning("No se encontraron productos terminados N3 que contengan este insumo o sus subrecetas.")
-
-    except Exception as e:
-        st.error(f"Error en la pantalla de simulación: {e}")
 
 # ------------------------------------------
 # MODO 4: EXPLORADOR DE TABLAS
