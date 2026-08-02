@@ -80,7 +80,7 @@ st.markdown(
 )
 
 # ==========================================
-# 3. CARGA Y LIMPIEZA DE DATOS DESDE GOOGLE SHEETS
+# 3. CARGA Y LIMPIEZA DE DATOS
 # ==========================================
 ID_HOJA = "1Y8Dzxl_1jVCUrceAQVfSc94RNugo2cgRsrHJwXLwmU4"
 
@@ -123,7 +123,7 @@ st.sidebar.markdown("### 🥧 Menú Principal")
 modo_app = st.sidebar.radio(
     "Selecciona la función:",
     [
-        "🍰 Simulación Financiera Proporcional",
+        "🍰 Simulación Financiera Multinivel",
         "📋 Ficha Técnica de Producto (N3)",
         "📊 Control de Márgenes y Estados (N3)",
         "📖 Explorador de Tablas",
@@ -132,11 +132,11 @@ modo_app = st.sidebar.radio(
 st.sidebar.divider()
 
 # ------------------------------------------
-# MODO 1: SIMULACIÓN FINANCIERA (VERSIÓN ORIGINAL QUE SÍ FUNCIONABA)
+# MODO 1: SIMULACIÓN FINANCIERA (LÓGICA EXACTA QUE FUNCIONABA)
 # ------------------------------------------
-if modo_app == "🍰 Simulación Financiera Proporcional":
+if modo_app == "🍰 Simulación Financiera Multinivel":
     st.markdown("## 🍰 Simulación Financiera Proporcional")
-    st.caption("Ajusta el precio de un insumo base para evaluar el impacto directo en productos N3.")
+    st.caption("Ajusta el precio de un insumo base para evaluar el impacto en N1, N2 y el producto final N3.")
 
     try:
         df_mermas = cargar_pestaña("Mermas_Costos")
@@ -156,7 +156,6 @@ if modo_app == "🍰 Simulación Financiera Proporcional":
             articulo_mostrar = normalizar_texto(datos_insumo[col_nom_m])
             codigo_target = normalizar_texto(datos_insumo[col_cod_m])
 
-            # Extraer costo base del insumo
             costo_actual_unitario = buscar_valor_columna(
                 datos_insumo, ["Costo", "Precio", "P.U", "Unitario", "Valor", "Costo/Lt", "Costo/Kg"]
             )
@@ -185,43 +184,77 @@ if modo_app == "🍰 Simulación Financiera Proporcional":
                 st.metric("Variación Directa", f"+Bs {dif_precio_unitario:.2f}", delta=f"{porc_inc:.1f}%")
 
             st.divider()
-            st.subheader("2️⃣ Impacto Directo en Recetas (N3)")
+            st.subheader("2️⃣ Impacto Proporcional en Productos N3")
 
             if abs(dif_precio_unitario) < 0.001:
-                st.info("💡 Incrementa el **'Nuevo precio simulado'** arriba para ver la recalculación de costos en productos N3.")
+                st.info("💡 Modifica el **'Nuevo precio simulado'** arriba para ver el impacto en costos.")
             else:
+                # Cargar todas las capas de recetas
+                df_recetas_n1 = cargar_pestaña("Recetas_N1")
+                df_recetas_n2 = cargar_pestaña("Recetas_N2")
                 df_recetas_n3 = cargar_pestaña("Recetas_N3")
                 df_lista_n3 = cargar_pestaña("Lista_N3")
 
-                # Limpieza para coincidencia perfecta
                 cod_target_clean = codigo_target.upper().strip()
                 nom_target_clean = articulo_mostrar.upper().strip()
 
-                # Mapa de consumo por producto final N3
-                consumo_por_producto = {}
+                def es_coincidente(cod_row, nom_row):
+                    if cod_target_clean and cod_target_clean == str(cod_row).upper().strip():
+                        return True
+                    if nom_target_clean and nom_target_clean in str(nom_row).upper().strip():
+                        return True
+                    return False
 
-                col_nom_receta = df_recetas_n3.columns[0]
-                col_nom_insumo = df_recetas_n3.columns[1] if len(df_recetas_n3.columns) > 1 else ""
-                col_cod_insumo = df_recetas_n3.columns[2] if len(df_recetas_n3.columns) > 2 else ""
-                col_cant_insumo = df_recetas_n3.columns[4] if len(df_recetas_n3.columns) > 4 else ""
+                # 1. Rastrear en N1
+                subrecetas_n1_afectadas = {}
+                for _, r in df_recetas_n1.iterrows():
+                    nom_padre = normalizar_texto(r.iloc[0])
+                    nom_ins = normalizar_texto(r.iloc[1])
+                    cod_ins = normalizar_texto(r.iloc[2]) if len(r) > 2 else ""
+                    cant = extraer_num(r.iloc[4]) if len(r) > 4 else 0.0
 
+                    if es_coincidente(cod_ins, nom_ins) and nom_padre and cant > 0:
+                        subrecetas_n1_afectadas[nom_padre.upper()] = subrecetas_n1_afectadas.get(nom_padre.upper(), 0.0) + cant
+
+                # 2. Rastrear en N2
+                subrecetas_n2_afectadas = {}
+                for _, r in df_recetas_n2.iterrows():
+                    nom_padre = normalizar_texto(r.iloc[0])
+                    nom_ins = normalizar_texto(r.iloc[1])
+                    cod_ins = normalizar_texto(r.iloc[2]) if len(r) > 2 else ""
+                    cant = extraer_num(r.iloc[4]) if len(r) > 4 else 0.0
+
+                    # Coincidencia directa del insumo o de una subreceta N1
+                    if es_coincidente(cod_ins, nom_ins):
+                        subrecetas_n2_afectadas[nom_padre.upper()] = subrecetas_n2_afectadas.get(nom_padre.upper(), 0.0) + cant
+                    elif nom_ins.upper() in subrecetas_n1_afectadas:
+                        factor_n1 = subrecetas_n1_afectadas[nom_ins.upper()]
+                        subrecetas_n2_afectadas[nom_padre.upper()] = subrecetas_n2_afectadas.get(nom_padre.upper(), 0.0) + (cant * factor_n1)
+
+                # 3. Rastrear en N3 (Productos Terminados)
+                consumo_total_n3 = {}
                 for _, r in df_recetas_n3.iterrows():
-                    p_nombre = normalizar_texto(r[col_nom_receta])
-                    ins_nombre = normalizar_texto(r[col_nom_insumo]).upper() if col_nom_insumo else ""
-                    ins_codigo = normalizar_texto(r[col_cod_insumo]).upper() if col_cod_insumo else ""
-                    cant = extraer_num(r[col_cant_insumo]) if col_cant_insumo else 0.0
+                    nom_padre = normalizar_texto(r.iloc[0])
+                    nom_ins = normalizar_texto(r.iloc[1])
+                    cod_ins = normalizar_texto(r.iloc[2]) if len(r) > 2 else ""
+                    cant = extraer_num(r.iloc[4]) if len(r) > 4 else 0.0
 
-                    # Coincidencia directa por código o nombre
-                    es_coincidencia = False
-                    if cod_target_clean and cod_target_clean == ins_codigo:
-                        es_coincidencia = True
-                    elif nom_target_clean and nom_target_clean in ins_nombre:
-                        es_coincidencia = True
+                    if not nom_padre or cant <= 0:
+                        continue
 
-                    if es_coincidencia and p_nombre and cant > 0:
-                        consumo_por_producto[p_nombre] = consumo_por_producto.get(p_nombre, 0.0) + cant
+                    # Directo insumo base
+                    if es_coincidente(cod_ins, nom_ins):
+                        consumo_total_n3[nom_padre] = consumo_total_n3.get(nom_padre, 0.0) + cant
+                    # A través de N1
+                    elif nom_ins.upper() in subrecetas_n1_afectadas:
+                        factor = subrecetas_n1_afectadas[nom_ins.upper()]
+                        consumo_total_n3[nom_padre] = consumo_total_n3.get(nom_padre, 0.0) + (cant * factor)
+                    # A través de N2
+                    elif nom_ins.upper() in subrecetas_n2_afectadas:
+                        factor = subrecetas_n2_afectadas[nom_ins.upper()]
+                        consumo_total_n3[nom_padre] = consumo_total_n3.get(nom_padre, 0.0) + (cant * factor)
 
-                # Cruzar con Lista_N3 para calcular costos y márgenes finales
+                # 4. Construir tabla final cruzando con Lista_N3
                 filas_resultado = []
                 col_nom_l3 = df_lista_n3.columns[0]
                 col_cod_l3 = df_lista_n3.columns[1] if len(df_lista_n3.columns) > 1 else col_nom_l3
@@ -230,8 +263,8 @@ if modo_app == "🍰 Simulación Financiera Proporcional":
                     nom_prod = normalizar_texto(r[col_nom_l3])
                     cod_prod = normalizar_texto(r[col_cod_l3])
 
-                    if nom_prod in consumo_por_producto:
-                        cant_usada = consumo_por_producto[nom_prod]
+                    if nom_prod in consumo_total_n3:
+                        cant_usada = consumo_total_n3[nom_prod]
                         incremento_costo = cant_usada * dif_precio_unitario
 
                         costo_orig = buscar_valor_columna(r, ["Costo Total N3", "Costo R3", "Costo Total", "Costo"])
@@ -249,7 +282,7 @@ if modo_app == "🍰 Simulación Financiera Proporcional":
                         filas_resultado.append({
                             "Código ERP": cod_prod,
                             "Producto Terminado (N3)": nom_prod,
-                            "Cant. Usada": cant_usada,
+                            "Cant. Insumo Base": cant_usada,
                             "Costo Orig. (Bs)": costo_orig,
                             "Costo Simul. (Bs)": costo_simulado,
                             "Incremento (Bs)": incremento_costo,
@@ -261,10 +294,10 @@ if modo_app == "🍰 Simulación Financiera Proporcional":
 
                 if filas_resultado:
                     df_res = pd.DataFrame(filas_resultado)
-                    st.success(f"🎯 Se encontraron **{len(df_res)}** Productos Terminados (N3) directamente afectados por este insumo:")
+                    st.success(f"🎯 Se encontraron **{len(df_res)}** Productos Terminados (N3) afectados por este insumo:")
                     st.dataframe(
                         df_res.style.format({
-                            "Cant. Usada": "{:.3f}",
+                            "Cant. Insumo Base": "{:.3f}",
                             "Costo Orig. (Bs)": "{:.2f} Bs",
                             "Costo Simul. (Bs)": "{:.2f} Bs",
                             "Incremento (Bs)": "+{:.2f} Bs",
@@ -273,7 +306,7 @@ if modo_app == "🍰 Simulación Financiera Proporcional":
                         height=500,
                     )
                 else:
-                    st.warning("No se encontraron productos en 'Recetas_N3' que usen directamente este insumo.")
+                    st.warning("No se encontraron productos N3 que utilicen este insumo ni de forma directa ni a través de subrecetas N1/N2.")
 
     except Exception as e:
         st.error(f"Error en la pantalla de simulación: {e}")
@@ -283,7 +316,7 @@ if modo_app == "🍰 Simulación Financiera Proporcional":
 # ------------------------------------------
 elif modo_app == "📋 Ficha Técnica de Producto (N3)":
     st.markdown("## 📋 Ficha Técnica Interactiva de Producto Terminado")
-    st.caption("Consulta el costo, precios de venta, márgenes y desglosa la estructura multinivel de recetas.")
+    st.caption("Consulta costo, precios de venta, márgenes y la lista completa de ingredientes del producto.")
 
     try:
         df_recetas_n3 = cargar_pestaña("Recetas_N3")
@@ -340,7 +373,7 @@ elif modo_app == "📋 Ficha Técnica de Producto (N3)":
                     st.metric("Precio Venta 3", "No Aplica")
 
             st.divider()
-            st.markdown("##### 🌳 Estructura de Receta")
+            st.markdown("##### 🌳 Componentes / Ingredientes de Receta")
 
             col_receta_padre = df_recetas_n3.columns[0]
             sub_df = df_recetas_n3[df_recetas_n3[col_receta_padre].astype(str).str.strip().str.upper() == nombre_producto.upper()]
@@ -360,7 +393,7 @@ elif modo_app == "📋 Ficha Técnica de Producto (N3)":
                     if nom_mp and nom_mp not in ["NO SE ENCONTRO", "NADA", "-"]:
                         mp_rows.append({
                             "Código ERP": cod_mp if cod_mp else "-",
-                            "Nombre del Insumo": nom_mp,
+                            "Nombre del Insumo / Subreceta": nom_mp,
                             "Categoría": cat_mp,
                             "Cantidad": cant_mp,
                             "Unidad": unid_mp
@@ -379,7 +412,7 @@ elif modo_app == "📋 Ficha Técnica de Producto (N3)":
 # ------------------------------------------
 elif modo_app == "📊 Control de Márgenes y Estados (N3)":
     st.markdown("## 📊 Tablero de Control de Márgenes por Estado")
-    st.caption("Visualiza de forma rápida qué productos están dentro o fuera del objetivo de rentabilidad.")
+    st.caption("Visualiza el semáforo de salud financiera por producto según tus objetivos de rentabilidad.")
 
     try:
         df_lista_n3 = cargar_pestaña("Lista_N3")
