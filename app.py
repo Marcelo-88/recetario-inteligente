@@ -2,33 +2,43 @@ import re
 import pandas as pd
 import streamlit as st
 
-# 1. CONFIGURACIÓN DE PÁGINA
+# ==========================================
+# 1. CONFIGURACIÓN DE PÁGINA DE STREAMLIT
+# ==========================================
 st.set_page_config(
     page_title="Fridolin | Simulación de Costos & Recetario",
     page_icon="🍰",
     layout="wide",
 )
 
-# 2. ESTILOS CSS LIMPIOS (Poppins sin romper UI de Streamlit)
+# ==========================================
+# 2. ESTILOS Y COLORES FRIDOLIN
+# ==========================================
 CSS_FRIDOLIN = """
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
 
-    /* Aplicar Poppins solo a texto del contenido */
-    html, body, .main, section[data-testid="stSidebar"] {
+    /* 1. TIPOGRAFÍA SOLO PARA EL CONTENIDO (Protege los iconos del sistema) */
+    .stApp [data-testid="stMarkdownContainer"], 
+    .stApp .stText, 
+    .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
+    .stApp label, .stApp input, .stApp select, .stApp button,
+    .stApp [data-testid="stMetricValue"], .stApp [data-testid="stMetricLabel"],
+    .stApp .stSelectbox, .stApp .stNumberInput, .stApp .stDataFrame {
         font-family: 'Poppins', sans-serif !important;
     }
 
-    p, span, label, input, button, select {
-        font-family: 'Poppins', sans-serif !important;
+    /* 2. PROTECCIÓN DE ICONOS NATIVOS DE STREAMLIT */
+    [class*="material-"], [class*="st-emotion-cache"], i {
+        font-family: 'Material Symbols Rounded', 'Material Icons', sans-serif !important;
     }
 
-    /* Fondo General Soft */
+    /* Fondo General de la App */
     .stApp {
         background-color: #FAF8F5;
     }
 
-    /* BANNER PRINCIPAL (Guindo con Letras Blancas) */
+    /* BANNER PRINCIPAL (Fondo Guindo + Texto Blanco Puro) */
     .header-fridolin {
         background-color: #8B1D2C !important;
         padding: 1.8rem 2rem !important;
@@ -68,7 +78,7 @@ CSS_FRIDOLIN = """
         color: #8B1D2C !important;
     }
 
-    /* Tabs Activas */
+    /* Pestañas / Tabs Activas */
     button[data-baseweb="tab"] {
         font-family: 'Poppins', sans-serif !important;
         font-weight: 600 !important;
@@ -80,7 +90,7 @@ CSS_FRIDOLIN = """
         border-bottom-color: #8B1D2C !important;
     }
 
-    /* Métricas */
+    /* Color de Métricas y Valores Destacados */
     [data-testid="stMetricValue"] {
         color: #8B1D2C !important;
         font-weight: 700 !important;
@@ -90,7 +100,9 @@ CSS_FRIDOLIN = """
 """
 st.markdown(CSS_FRIDOLIN, unsafe_allow_html=True)
 
+# ==========================================
 # 3. ENCABEZADO PRINCIPAL (BANNER)
+# ==========================================
 st.markdown(
     """
     <div class="header-fridolin">
@@ -101,7 +113,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# 4. CARGA Y LOGICA DE DATOS
+# ==========================================
+# 4. FUNCIONES DE LÓGICA Y DATOS
+# ==========================================
 ID_HOJA = "1Y8Dzxl_1jVCUrceAQVfSc94RNugo2cgRsrHJwXLwmU4"
 
 
@@ -189,7 +203,9 @@ def obtener_rendimiento_total_batch(row_values):
     return total if total > 0 else 1.0
 
 
-# BARRA LATERAL
+# ==========================================
+# 5. MENÚ LATERAL Y NAVEGACIÓN
+# ==========================================
 st.sidebar.markdown("### 🥧 Menú Principal")
 modo_app = st.sidebar.radio(
     "Selecciona la función:",
@@ -353,7 +369,7 @@ elif modo_app == "🍰 Simulación Financiera Multinivel":
 
                 return 0.0, "-", str(busqueda_str).strip()
 
-            # --- 1. RECETAS N1 ---
+            # --- RECETAS N1 ---
             impactos_n1_kilo = {}
             for _, row in df_recetas_n1.iterrows():
                 vals = [str(v).strip() for v in row.values]
@@ -398,7 +414,7 @@ elif modo_app == "🍰 Simulación Financiera Multinivel":
                     "Variación (%)": f"+{porc_var:.1f}%",
                 })
 
-            # --- 2. RECETAS N2 ---
+            # --- RECETAS N2 ---
             impactos_n2_kilo = {}
             for _, row in df_recetas_n2.iterrows():
                 vals = [str(v).strip() for v in row.values]
@@ -461,7 +477,7 @@ elif modo_app == "🍰 Simulación Financiera Multinivel":
                     "Variación (%)": f"+{porc_var:.1f}%",
                 })
 
-            # --- 3. RECETAS N3 ---
+            # --- RECETAS N3 ---
             impactos_n3 = {}
             for _, row in df_recetas_n3.iterrows():
                 vals = [str(v).strip() for v in row.values]
