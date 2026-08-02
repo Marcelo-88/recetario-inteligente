@@ -9,7 +9,7 @@ st.set_page_config(
 )
 
 st.title("🍳 Recetario Inteligente & Centro de Control")
-st.caption("Simulación Financiera Multilevel Exacta (Cantidad × Variación de Costo)")
+st.caption("Simulación Financiera Multilevel Dinámica por Encabezados de Columna")
 st.divider()
 
 ID_HOJA = "1Y8Dzxl_1jVCUrceAQVfSc94RNugo2cgRsrHJwXLwmU4"
@@ -19,17 +19,28 @@ ID_HOJA = "1Y8Dzxl_1jVCUrceAQVfSc94RNugo2cgRsrHJwXLwmU4"
 def cargar_pestaña(nombre_pestaña):
     url = f"https://docs.google.com/spreadsheets/d/{ID_HOJA}/gviz/tq?tqx=out:csv&sheet={nombre_pestaña}"
     df = pd.read_csv(url, dtype=str)
-    df.columns = df.columns.str.strip()
+    # Limpiamos nombres de columnas quitando espacios extras
+    df.columns = [str(c).strip() for c in df.columns]
     return df.fillna("")
 
 
-def limpiar_codigo(val):
+def normalizar_cod(val):
+    """Normaliza códigos quitando guiones y espacios para comparaciones súper robustas."""
     if pd.isna(val) or str(val).strip() in ["", "-", "nan", "NO SE ENCONTRO", "NADA"]:
         return ""
-    val_str = str(val).strip()
-    if val_str.endswith(".0"):
-        val_str = val_str[:-2]
-    return val_str.upper().strip()
+    v = str(val).strip()
+    if v.endswith(".0"):
+        v = v[:-2]
+    return re.sub(r"[^A-Za-z0-9]", "", v).upper()
+
+
+def limpiar_cod_mostrar(val):
+    if pd.isna(val) or str(val).strip() in ["", "-", "nan", "NO SE ENCONTRO", "NADA"]:
+        return ""
+    v = str(val).strip()
+    if v.endswith(".0"):
+        v = v[:-2]
+    return v.upper()
 
 
 def extraer_num(val):
@@ -40,6 +51,16 @@ def extraer_num(val):
         return float(cleaned) if cleaned else 0.0
     except Exception:
         return 0.0
+
+
+def buscar_columna_por_patron(df, patrones):
+    """Busca dinámicamente el nombre exacto de la columna que coincida con algún patrón."""
+    for col in df.columns:
+        col_clean = str(col).strip().upper()
+        for pat in patrones:
+            if pat.upper() in col_clean:
+                return col
+    return None
 
 
 # -------------------------------------------------------------
@@ -90,12 +111,13 @@ if modo_app == "📋 Explorador de Tablas":
         st.error(f"Error al cargar {pestaña_activa}: {e}")
 
 elif modo_app == "💥 Simulación Financiera Multinivel":
-    st.header("💥 Simulación por Posición Exacta de Columnas")
+    st.header("💥 Simulación Multinivel por Mapeo Dinámico de Columnas")
     st.info(
-        "Fórmula aplicada: Variación Total (Bs) = Cantidad Usada × Delta Precio Insumo"
+        "Lógica estricta: Multiplicación de Cantidades Consumidas × Incremento del Insumo Base"
     )
 
     try:
+        # Carga de pestañas
         df_mermas = cargar_pestaña("Mermas_Costos")
         df_recetas_n1 = cargar_pestaña("Recetas_N1")
         df_recetas_n2 = cargar_pestaña("Recetas_N2")
@@ -105,26 +127,27 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
         df_lista_n2 = cargar_pestaña("Listas_N2")
         df_lista_n3 = cargar_pestaña("Lista_N3")
 
-        col_nom_mermas = df_mermas.columns[0]
-        col_cod_mermas = df_mermas.columns[1]
+        # Mapeo Mermas_Costos
+        col_nom_m = df_mermas.columns[0]
+        col_cod_m = df_mermas.columns[1]
+        col_costo_m = buscar_columna_por_patron(
+            df_mermas, ["COSTO", "PRECIO", "VALOR"]
+        ) or df_mermas.columns[-1]
 
-        def buscar_col_costo(df):
-            for c in df.columns:
-                if any(k in c.upper() for k in ["COSTO", "PRECIO", "VALOR"]):
-                    return c
-            return df.columns[-1]
+        df_mermas["COD_RAW"] = df_mermas[col_cod_m].apply(limpiar_cod_mostrar)
+        df_mermas["COD_NORM"] = df_mermas[col_cod_m].apply(normalizar_cod)
 
-        df_mermas["COD_CLEAN"] = df_mermas[col_cod_mermas].apply(limpiar_codigo)
-        df_mermas_validos = df_mermas[df_mermas["COD_CLEAN"] != ""].copy()
-
+        df_mermas_validos = df_mermas[df_mermas["COD_NORM"] != ""].copy()
         df_mermas_validos["COMBO_LABEL"] = (
             "["
-            + df_mermas_validos["COD_CLEAN"]
+            + df_mermas_validos["COD_RAW"]
             + "] "
-            + df_mermas_validos[col_nom_mermas].astype(str).str.strip()
+            + df_mermas_validos[col_nom_m].astype(str).str.strip()
         )
 
-        lista_opciones = sorted(df_mermas_validos["COMBO_LABEL"].unique().tolist())
+        lista_opciones = sorted(
+            df_mermas_validos["COMBO_LABEL"].unique().tolist()
+        )
 
         st.subheader("1️⃣ Selecciona el Código del Insumo a Simular")
         opcion_elegida = st.selectbox(
@@ -136,15 +159,15 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 df_mermas_validos["COMBO_LABEL"] == opcion_elegida
             ].iloc[0]
 
-            codigo_target = datos_insumo["COD_CLEAN"]
-            articulo_mostrar = str(datos_insumo[col_nom_mermas]).strip()
+            codigo_target_norm = datos_insumo["COD_NORM"]
+            codigo_target_raw = datos_insumo["COD_RAW"]
+            articulo_mostrar = str(datos_insumo[col_nom_m]).strip()
 
-            col_costo_m = buscar_col_costo(df_mermas)
             costo_actual = extraer_num(datos_insumo[col_costo_m])
 
             c1, c2, c3 = st.columns(3)
             with c1:
-                st.metric("Código ERP Insumo", f"[{codigo_target}]")
+                st.metric("Código ERP Insumo", f"[{codigo_target_raw}]")
                 st.caption(articulo_mostrar)
             with c2:
                 nuevo_precio = st.number_input(
@@ -166,48 +189,66 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
 
             st.divider()
 
-            def preparar_lista(df):
-                df_c = df.copy()
-                df_c.columns = [c.strip() for c in df_c.columns]
-                cols = list(df_c.columns)
-                df_c["COD_KEY"] = df_c[cols[0]].apply(limpiar_codigo)
-                df_c["NOM_KEY"] = df_c[cols[1]] if len(cols) > 1 else df_c[cols[0]]
-                col_c = buscar_col_costo(df_c)
-                df_c["COSTO_VAL"] = df_c[col_c].apply(extraer_num)
-                return df_c
+            # Helper para consultar precios en Listas Máster
+            def consultar_master(df_lista, cod_o_nom):
+                col_cod = df_lista.columns[0]
+                col_nom = df_lista.columns[1] if len(df_lista.columns) > 1 else col_cod
+                col_costo = buscar_columna_por_patron(
+                    df_lista, ["COSTO", "PRECIO", "VALOR"]
+                ) or df_lista.columns[-1]
 
-            l1 = preparar_lista(df_lista_n1)
-            l2 = preparar_lista(df_lista_n2)
-            l3 = preparar_lista(df_lista_n3)
+                query_norm = normalizar_cod(cod_o_nom)
+                query_str = str(cod_o_nom).strip().upper()
+
+                match = df_lista[
+                    (df_lista[col_cod].apply(normalizar_cod) == query_norm)
+                    | (df_lista[col_nom].astype(str).str.strip().str.upper() == query_str)
+                ]
+
+                if not match.empty:
+                    c_base = extraer_num(match.iloc[0][col_costo])
+                    c_show = limpiar_cod_mostrar(match.iloc[0][col_cod])
+                    n_show = str(match.iloc[0][col_nom]).strip()
+                    return c_base, c_show, n_show
+                return 0.0, str(cod_o_nom).strip(), str(cod_o_nom).strip()
 
             # --- EVALUAR RECETAS N1 ---
-            # Asume Col A: Receta Padre, Col C: Insumo Cod, Col E/I: Cantidad
-            impactos_n1 = {}
-            for _, row in df_recetas_n1.iterrows():
-                vals = list(row.values)
-                if len(vals) < 3:
-                    continue
-                receta_padre = limpiar_codigo(vals[0])
-                if not receta_padre:
-                    continue
-
-                cod_insumo = limpiar_codigo(vals[2]) if len(vals) > 2 else ""
-                cant_usada = extraer_num(vals[4]) if len(vals) > 4 else 0.0
-
-                if cod_insumo == codigo_target and cant_usada > 0:
-                    inc = cant_usada * dif_precio
-                    impactos_n1[receta_padre] = impactos_n1.get(receta_padre, 0.0) + inc
-
+            impactos_n1 = {}  # {cod_norm_n1: inc_total_bs}
             filas_n1 = []
-            for cod_rec, inc_total in impactos_n1.items():
-                master = l1[l1["COD_KEY"] == cod_rec]
-                costo_base = master.iloc[0]["COSTO_VAL"] if not master.empty else 0.0
-                nom_rec = master.iloc[0]["NOM_KEY"] if not master.empty else cod_rec
+
+            for _, row in df_recetas_n1.iterrows():
+                vals = [str(v).strip() for v in row.values]
+                if not vals or not vals[0]:
+                    continue
+
+                receta_padre_norm = normalizar_cod(vals[0])
+                if not receta_padre_norm:
+                    continue
+
+                # Recorremos la fila buscando si el insumo está en alguna celda
+                row_norms = [normalizar_cod(v) for v in vals]
+                if codigo_target_norm in row_norms[1:]:
+                    idx = row_norms[1:].index(codigo_target_norm) + 1
+                    # Buscamos la cantidad asociada en la celda contigua o siguiente numérica
+                    cant = 0.0
+                    for k in range(idx + 1, min(idx + 4, len(vals))):
+                        num = extraer_num(vals[k])
+                        if num > 0:
+                            cant = num
+                            break
+
+                    inc = (cant if cant > 0 else 1.0) * dif_precio
+                    impactos_n1[receta_padre_norm] = (
+                        impactos_n1.get(receta_padre_norm, 0.0) + inc
+                    )
+
+            for cod_norm, inc_total in impactos_n1.items():
+                costo_base, cod_show, nom_show = consultar_master(df_lista_n1, cod_norm)
                 porc_var = (inc_total / costo_base * 100) if costo_base > 0 else 0.0
 
                 filas_n1.append({
-                    "Código Receta N1": cod_rec,
-                    "Nombre Sub-Receta": nom_rec,
+                    "Código Receta N1": cod_show,
+                    "Nombre Sub-Receta": nom_show,
                     "Costo Actual Batch": f"Bs {costo_base:.2f}",
                     "Costo Simulado Batch": f"Bs {(costo_base + inc_total):.2f}",
                     "Variación (Bs)": f"+Bs {inc_total:.2f}",
@@ -216,36 +257,55 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
 
             # --- EVALUAR RECETAS N2 ---
             impactos_n2 = {}
-            for _, row in df_recetas_n2.iterrows():
-                vals = list(row.values)
-                if len(vals) < 3:
-                    continue
-                receta_padre = limpiar_codigo(vals[0])
-                if not receta_padre:
-                    continue
-
-                cod_insumo = limpiar_codigo(vals[2]) if len(vals) > 2 else ""
-                cant_usada = extraer_num(vals[4]) if len(vals) > 4 else 0.0
-
-                inc = 0.0
-                if cod_insumo == codigo_target and cant_usada > 0:
-                    inc += cant_usada * dif_precio
-                elif cod_insumo in impactos_n1 and cant_usada > 0:
-                    inc += cant_usada * impactos_n1[cod_insumo]
-
-                if inc > 0:
-                    impactos_n2[receta_padre] = impactos_n2.get(receta_padre, 0.0) + inc
-
             filas_n2 = []
-            for cod_rec, inc_total in impactos_n2.items():
-                master = l2[l2["COD_KEY"] == cod_rec]
-                costo_base = master.iloc[0]["COSTO_VAL"] if not master.empty else 0.0
-                nom_rec = master.iloc[0]["NOM_KEY"] if not master.empty else cod_rec
+
+            for _, row in df_recetas_n2.iterrows():
+                vals = [str(v).strip() for v in row.values]
+                if not vals or not vals[0]:
+                    continue
+
+                receta_padre_norm = normalizar_cod(vals[0])
+                if not receta_padre_norm:
+                    continue
+
+                row_norms = [normalizar_cod(v) for v in vals]
+                inc_fila = 0.0
+
+                # Check 1: Insumo directo en N2
+                if codigo_target_norm in row_norms[1:]:
+                    idx = row_norms[1:].index(codigo_target_norm) + 1
+                    cant = 0.0
+                    for k in range(idx + 1, min(idx + 4, len(vals))):
+                        num = extraer_num(vals[k])
+                        if num > 0:
+                            cant = num
+                            break
+                    inc_fila += (cant if cant > 0 else 1.0) * dif_precio
+
+                # Check 2: Sub-receta N1 afectada en N2
+                for cod_n1_norm, inc_n1 in impactos_n1.items():
+                    if cod_n1_norm in row_norms[1:]:
+                        idx = row_norms[1:].index(cod_n1_norm) + 1
+                        cant = 0.0
+                        for k in range(idx + 1, min(idx + 4, len(vals))):
+                            num = extraer_num(vals[k])
+                            if num > 0:
+                                cant = num
+                                break
+                        inc_fila += (cant if cant > 0 else 1.0) * inc_n1
+
+                if inc_fila > 0:
+                    impactos_n2[receta_padre_norm] = (
+                        impactos_n2.get(receta_padre_norm, 0.0) + inc_fila
+                    )
+
+            for cod_norm, inc_total in impactos_n2.items():
+                costo_base, cod_show, nom_show = consultar_master(df_lista_n2, cod_norm)
                 porc_var = (inc_total / costo_base * 100) if costo_base > 0 else 0.0
 
                 filas_n2.append({
-                    "Código Receta N2": cod_rec,
-                    "Nombre Intermedio": nom_rec,
+                    "Código Receta N2": cod_show,
+                    "Nombre Intermedio": nom_show,
                     "Costo Actual Batch": f"Bs {costo_base:.2f}",
                     "Costo Simulado Batch": f"Bs {(costo_base + inc_total):.2f}",
                     "Variación (Bs)": f"+Bs {inc_total:.2f}",
@@ -253,62 +313,66 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 })
 
             # --- EVALUAR RECETAS N3 ---
-            # Según tu Google Sheet:
-            # Col A (0): Nombre Receta N3
-            # Col C (2): Código MP | Col E (4): Cantidad MP
-            # Col H (7): Código N1 | Col I (8): Cantidad N1
-            # Col L (11): Código N2 | Col M (12): Cantidad N2
             impactos_n3 = {}
+            filas_n3 = []
 
             for _, row in df_recetas_n3.iterrows():
-                vals = list(row.values)
-                if not vals:
+                vals = [str(v).strip() for v in row.values]
+                if not vals or not vals[0]:
                     continue
 
-                nombre_n3 = str(vals[0]).strip()
-                if not nombre_n3 or nombre_n3.upper() in ["NAN", ""]:
-                    continue
+                nombre_o_cod_n3 = vals[0]
+                row_norms = [normalizar_cod(v) for v in vals]
 
                 inc_fila = 0.0
 
-                # 1. Chequeo Materia Prima Directa (Col C y E)
-                if len(vals) > 4:
-                    cod_mp = limpiar_codigo(vals[2])
-                    cant_mp = extraer_num(vals[4])
-                    if cod_mp == codigo_target and cant_mp > 0:
-                        inc_fila += cant_mp * dif_precio
+                # 1. MP Directa en N3
+                if codigo_target_norm in row_norms[1:]:
+                    idx = row_norms[1:].index(codigo_target_norm) + 1
+                    cant = 0.0
+                    for k in range(idx + 1, min(idx + 4, len(vals))):
+                        num = extraer_num(vals[k])
+                        if num > 0:
+                            cant = num
+                            break
+                    inc_fila += (cant if cant > 0 else 1.0) * dif_precio
 
-                # 2. Chequeo Sub-Receta N1 (Col H e I)
-                if len(vals) > 8:
-                    cod_n1 = limpiar_codigo(vals[7])
-                    cant_n1 = extraer_num(vals[8])
-                    if cod_n1 in impactos_n1 and cant_n1 > 0:
-                        inc_fila += cant_n1 * impactos_n1[cod_n1]
+                # 2. Sub-receta N1 en N3
+                for cod_n1_norm, inc_n1 in impactos_n1.items():
+                    if cod_n1_norm in row_norms[1:]:
+                        idx = row_norms[1:].index(cod_n1_norm) + 1
+                        cant = 0.0
+                        for k in range(idx + 1, min(idx + 4, len(vals))):
+                            num = extraer_num(vals[k])
+                            if num > 0:
+                                cant = num
+                                break
+                        inc_fila += (cant if cant > 0 else 1.0) * inc_n1
 
-                # 3. Chequeo Sub-Receta N2 (Col L y M)
-                if len(vals) > 12:
-                    cod_n2 = limpiar_codigo(vals[11])
-                    cant_n2 = extraer_num(vals[12])
-                    if cod_n2 in impactos_n2 and cant_n2 > 0:
-                        inc_fila += cant_n2 * impactos_n2[cod_n2]
+                # 3. Sub-receta N2 en N3
+                for cod_n2_norm, inc_n2 in impactos_n2.items():
+                    if cod_n2_norm in row_norms[1:]:
+                        idx = row_norms[1:].index(cod_n2_norm) + 1
+                        cant = 0.0
+                        for k in range(idx + 1, min(idx + 4, len(vals))):
+                            num = extraer_num(vals[k])
+                            if num > 0:
+                                cant = num
+                                break
+                        inc_fila += (cant if cant > 0 else 1.0) * inc_n2
 
                 if inc_fila > 0:
-                    impactos_n3[nombre_n3] = impactos_n3.get(nombre_n3, 0.0) + inc_fila
+                    impactos_n3[nombre_o_cod_n3] = (
+                        impactos_n3.get(nombre_o_cod_n3, 0.0) + inc_fila
+                    )
 
-            filas_n3 = []
-            for nom_rec, inc_total in impactos_n3.items():
-                master = l3[
-                    (l3["NOM_KEY"].str.strip().str.upper() == nom_rec.upper())
-                    | (l3["COD_KEY"] == limpiar_codigo(nom_rec))
-                ]
-
-                costo_base = master.iloc[0]["COSTO_VAL"] if not master.empty else 0.0
-                cod_show = master.iloc[0]["COD_KEY"] if not master.empty else "-"
+            for nom_o_cod, inc_total in impactos_n3.items():
+                costo_base, cod_show, nom_show = consultar_master(df_lista_n3, nom_o_cod)
                 porc_var = (inc_total / costo_base * 100) if costo_base > 0 else 0.0
 
                 filas_n3.append({
                     "Código Producto N3": cod_show,
-                    "Nombre Producto Final": nom_rec,
+                    "Nombre Producto Final": nom_show,
                     "Costo Actual": f"Bs {costo_base:.2f}",
                     "Costo Simulado": f"Bs {(costo_base + inc_total):.2f}",
                     "Variación (Bs)": f"+Bs {inc_total:.2f}",
@@ -320,7 +384,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
             resumen_l3 = pd.DataFrame(filas_n3)
 
             st.subheader(
-                f"📊 Resultados de Simulación para Insumo: [{codigo_target}] - {articulo_mostrar}"
+                f"📊 Resultados de Simulación para Insumo: [{codigo_target_raw}] - {articulo_mostrar}"
             )
 
             t3, t2, t1 = st.tabs(
