@@ -5,21 +5,22 @@ import streamlit as st
 # 1. CONFIGURACIÓN DE PÁGINA
 st.set_page_config(
     page_title="Fridolin | Simulación de Costos & Recetario",
-    page_icon="🎂",
+    page_icon="🍰",
     layout="wide",
 )
 
-# 2. ESTILOS Y COLORES FRIDOLIN (CSS)
+# 2. ESTILOS, TIPOGRAFÍA GLOBAL Y COLORES FRIDOLIN (CSS)
 CSS_FRIDOLIN = """
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap');
 
-    /* Tipografía Corporativa */
-    html, body, [class*="css"] {
+    /* UNIFICACIÓN TIPOGRÁFICA Y COLOR DE TEXTO EN TODO EL SITIO */
+    html, body, [class*="css"], [class*="st-"], .stMarkdown, p, h1, h2, h3, h4, h5, h6, span, label, div {
         font-family: 'Poppins', sans-serif !important;
+        color: #222222 !important;
     }
 
-    /* Fondo General (Crema Claro) */
+    /* Fondo General (Crema Soft) */
     .stApp {
         background-color: #FAF8F5;
     }
@@ -28,10 +29,10 @@ CSS_FRIDOLIN = """
     .header-fridolin {
         background-color: #8B1D2C;
         padding: 1.5rem 2rem;
-        border-radius: 10px;
+        border-radius: 12px;
         color: white;
         margin-bottom: 1.5rem;
-        box-shadow: 0 4px 12px rgba(139, 29, 44, 0.12);
+        box-shadow: 0 4px 12px rgba(139, 29, 44, 0.15);
     }
     .header-fridolin h1 {
         color: #FFFFFF !important;
@@ -52,6 +53,12 @@ CSS_FRIDOLIN = """
         border-right: 1px solid #EBE5DF;
     }
 
+    /* Títulos dentro de Streamlit (h1, h2, h3) */
+    h1, h2, h3 {
+        font-weight: 700 !important;
+        color: #8B1D2C !important;
+    }
+
     /* Pestañas / Tabs Activas */
     button[data-baseweb="tab"] {
         font-weight: 600 !important;
@@ -62,7 +69,7 @@ CSS_FRIDOLIN = """
         border-bottom-color: #8B1D2C !important;
     }
 
-    /* Color de Métricas y Valores */
+    /* Color de Métricas y Valores Destacados */
     [data-testid="stMetricValue"] {
         color: #8B1D2C !important;
         font-weight: 700;
@@ -169,16 +176,16 @@ def obtener_rendimiento_total_batch(row_values):
     return total if total > 0 else 1.0
 
 
-# BARRA LATERAL
-st.sidebar.markdown("### 🕹️ Módulos")
+# BARRA LATERAL CON EMOJIS DE PASTELERÍA
+st.sidebar.markdown("### 🥧 Menú Principal")
 modo_app = st.sidebar.radio(
     "Selecciona la función:",
-    ["📋 Explorador de Tablas", "💥 Simulación Financiera Multinivel"],
+    ["📖 Explorador de Tablas", "🍰 Simulación Financiera Multinivel"],
 )
 st.sidebar.divider()
 
-if modo_app == "📋 Explorador de Tablas":
-    st.sidebar.header("📁 Pestañas del Recetario")
+if modo_app == "📖 Explorador de Tablas":
+    st.sidebar.header("📋 Pestañas del Recetario")
     pestaña_activa = st.sidebar.radio(
         "Selecciona la vista:",
         [
@@ -196,7 +203,7 @@ if modo_app == "📋 Explorador de Tablas":
         with st.spinner(f"Cargando {pestaña_activa}..."):
             df = cargar_pestaña(pestaña_activa)
 
-        st.subheader(f"📊 Vista de Datos: {pestaña_activa}")
+        st.subheader(f"📖 Vista de Datos: {pestaña_activa}")
         busqueda = st.text_input(f"🔍 Buscar en {pestaña_activa}:")
 
         if busqueda:
@@ -214,8 +221,8 @@ if modo_app == "📋 Explorador de Tablas":
     except Exception as e:
         st.error(f"Error al cargar {pestaña_activa}: {e}")
 
-elif modo_app == "💥 Simulación Financiera Multinivel":
-    st.markdown("### 💥 Simulación Financiera Proporcional")
+elif modo_app == "🍰 Simulación Financiera Multinivel":
+    st.markdown("## 🍰 Simulación Financiera Proporcional")
     st.caption(
         "Simula el impacto en cadena de la materia prima hacia Sub-Recetas (N1), Intermedios (N2) y Productos Finales (N3)."
     )
