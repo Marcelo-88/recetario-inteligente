@@ -166,7 +166,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
 
             st.divider()
 
-            # --- TÉRMINOS DE BÚSQUEDA DEL INSUNO ORIGINAL ---
+            # --- TÉRMINOS DE BÚSQUEDA DEL INSUMO ORIGINAL ---
             terminos_busqueda = [
                 t
                 for t in [codigo_val, recetario_val, articulo_val]
@@ -176,8 +176,9 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 and len(t) > 2
             ]
 
-            # RASTREO N1
-            patron_n1 = "|".join([re.escape(t) for t in terminos_busqueda])
+            # RASTREO N1 (Definición explícita de terminos_n1)
+            terminos_n1 = list(terminos_busqueda)
+            patron_n1 = "|".join([re.escape(t) for t in terminos_n1])
             afectadas_recetas_n1 = df_recetas_n1[
                 df_recetas_n1.apply(
                     lambda r: r.astype(str)
@@ -289,11 +290,11 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                         )
                     ]
 
-                    # SI NO CONTIENE EL INSUMO EN SUS INGREDIENTES, OMITIR DE LA LISTA
+                    # SI NO CONTIENE EL INSUMO EN SUS INGREDIENTES, OMITIR
                     if filas_especificas.empty:
                         continue
 
-                    # Extraer la cantidad real usada en esta receta
+                    # Extraer cantidad real usada en esta receta
                     cantidad_usada = 0.0
                     cols_cantidad = [
                         c for c in filas_especificas.columns 
