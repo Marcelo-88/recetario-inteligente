@@ -1,3 +1,80 @@
+import pandas as pd
+import re
+import streamlit as st
+
+st.set_page_config(
+    page_title="Recetario Inteligente & Centro de Control",
+    page_icon="🍳",
+    layout="wide",
+)
+
+st.title("🍳 Recetario Inteligente & Centro de Control")
+st.caption("Simulación Financiera Ejecutiva y Efecto Dominó (Lista N1 ➔ N2 ➔ N3)")
+st.divider()
+
+ID_HOJA = "1Y8Dzxl_1jVCUrceAQVfSc94RNugo2cgRsrHJwXLwmU4"
+
+
+@st.cache_data(ttl=60)
+def cargar_pestaña(nombre_pestaña):
+    url = f"https://docs.google.com/spreadsheets/d/{ID_HOJA}/gviz/tq?tqx=out:csv&sheet={nombre_pestaña}"
+    df = pd.read_csv(url)
+    df.columns = df.columns.str.strip()
+    return df
+
+
+# 1. Menú Principal
+st.sidebar.header("🕹️ Módulos")
+modo_app = st.sidebar.radio(
+    "Selecciona la función:",
+    ["📋 Explorador de Tablas", "💥 Simulación Financiera Multinivel"],
+)
+st.sidebar.divider()
+
+# -------------------------------------------------------------
+# MÓDULO 1: EXPLORADOR DE TABLAS
+# -------------------------------------------------------------
+if modo_app == "📋 Explorador de Tablas":
+    st.sidebar.header("📁 Pestañas del Recetario")
+    pestaña_activa = st.sidebar.radio(
+        "Selecciona la vista:",
+        [
+            "Recetas_N3",
+            "Lista_N3",
+            "Recetas_N2",
+            "Listas_N2",
+            "Recetas_N1",
+            "Lista_N1",
+            "Materia_Prima",
+            "Mermas_Costos",
+        ],
+    )
+
+    try:
+        with st.spinner(f"Cargando {pestaña_activa}..."):
+            df = cargar_pestaña(pestaña_activa)
+
+        st.subheader(f"📊 Vista de Datos: {pestaña_activa}")
+        busqueda = st.text_input(
+            f"🔍 Buscar en {pestaña_activa} (receta, código, ingrediente):"
+        )
+
+        if busqueda:
+            mascara = df.apply(
+                lambda row: row.astype(str)
+                .str.contains(busqueda, case=False, na=False)
+                .any(),
+                axis=1,
+            )
+            df_filtrado = df[mascara]
+            st.success(f"Se encontraron **{len(df_filtrado)}** resultados")
+            st.dataframe(df_filtrado, use_container_width=True)
+        else:
+            st.dataframe(df, use_container_width=True)
+
+    except Exception as e:
+        st.error(f"Error al cargar {pestaña_activa}: {e}")
+
 # -------------------------------------------------------------
 # MÓDULO 2: SIMULACIÓN FINANCIERA MULTINIVEL
 # -------------------------------------------------------------
@@ -89,7 +166,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
 
             st.divider()
 
-            # --- TÉRMINOS DE BÚSQUEDA DEL INSUMO ORIGINAL ---
+            # --- TÉRMINOS DE BÚSQUEDA DEL INSUNO ORIGINAL ---
             terminos_busqueda = [
                 t
                 for t in [codigo_val, recetario_val, articulo_val]
@@ -99,12 +176,12 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 and len(t) > 2
             ]
 
-            # RASTREO N1 (Filtra solo las recetas que CONTIENEN los términos del insumo)
-            patron_n1 = "|".join([r"\b" + re.escape(t) + r"\b" if t.isalnum() else re.escape(t) for t in terminos_busqueda])
+            # RASTREO N1
+            patron_n1 = "|".join([re.escape(t) for t in terminos_busqueda])
             afectadas_recetas_n1 = df_recetas_n1[
                 df_recetas_n1.apply(
                     lambda r: r.astype(str)
-                    .str.contains("|".join(terminos_busqueda), case=False, na=False)
+                    .str.contains(patron_n1, case=False, na=False)
                     .any(),
                     axis=1,
                 )
@@ -117,12 +194,13 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 .tolist()
             )
 
-            # RASTREO N2 (Insumo directo o Subrecetas N1 verdaderamente afectadas)
+            # RASTREO N2
             terminos_n2 = terminos_busqueda + subrecetas_n1_nombres
+            patron_n2 = "|".join([re.escape(str(t)) for t in terminos_n2 if len(str(t)) > 2])
             afectadas_recetas_n2 = df_recetas_n2[
                 df_recetas_n2.apply(
                     lambda r: r.astype(str)
-                    .str.contains("|".join(terminos_n2), case=False, na=False)
+                    .str.contains(patron_n2, case=False, na=False)
                     .any(),
                     axis=1,
                 )
@@ -135,12 +213,13 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 .tolist()
             )
 
-            # RASTREO N3 (Insumo directo, Subrecetas N1 o Subrecetas N2 verdaderamente afectadas)
+            # RASTREO N3
             terminos_n3 = terminos_busqueda + subrecetas_n1_nombres + subrecetas_n2_nombres
+            patron_n3 = "|".join([re.escape(str(t)) for t in terminos_n3 if len(str(t)) > 2])
             afectadas_recetas_n3 = df_recetas_n3[
                 df_recetas_n3.apply(
                     lambda r: r.astype(str)
-                    .str.contains("|".join(terminos_n3), case=False, na=False)
+                    .str.contains(patron_n3, case=False, na=False)
                     .any(),
                     axis=1,
                 )
@@ -153,7 +232,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 .tolist()
             )
 
-            # --- FUNCIÓN DE CONSTRUCCIÓN DE TABLAS (CORREGIDA) ---
+            # --- FUNCIÓN DE CONSTRUCCIÓN DE TABLAS ---
             def construir_tabla_ejecutiva(
                 df_lista, df_recetas_afectadas, nombres_afectados, datos_insumo, dif_precio, terminos_simulados
             ):
@@ -202,7 +281,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                     ]
 
                     # BUSCAR SI EL INSUMO/SUBRECETA AFECTADA ESTÁ REALMENTE EN ESTA RECETA
-                    patron_busqueda = "|".join([str(t) for t in terminos_simulados if len(str(t)) > 2])
+                    patron_busqueda = "|".join([re.escape(str(t)) for t in terminos_simulados if len(str(t)) > 2])
                     filas_especificas = filas_ing[
                         filas_ing.apply(
                             lambda r: r.astype(str).str.contains(patron_busqueda, case=False, na=False).any(),
@@ -229,10 +308,8 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                                 cantidad_usada = v
                                 break
 
-                    # Si no encuentra columna de cantidad pero sabemos que está la fila, no inventamos si no hay dato
                     impacto_bs = dif_precio * cantidad_usada
                     
-                    # Solo agregamos si hay un impacto real mayor a 0
                     if impacto_bs > 0:
                         costo_simulado = costo_base + impacto_bs
                         var_porc = (impacto_bs / costo_base * 100) if costo_base > 0 else 0.0
