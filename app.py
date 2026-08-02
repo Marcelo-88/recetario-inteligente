@@ -145,7 +145,6 @@ if not df_mermas.empty and not df_l3.empty:
     col1, col2 = st.columns(2)
     
     with col1:
-        # Obtener lista única de insumos de Mermas_Costos
         col_insumo = 'Insumo Recetario' if 'Insumo Recetario' in df_mermas.columns else df_mermas.columns[0]
         lista_insumos = sorted(df_mermas[col_insumo].dropna().astype(str).unique())
         
@@ -170,5 +169,3 @@ if not df_mermas.empty and not df_l3.empty:
             st.dataframe(tabla_simulada)
         else:
             st.info("ℹ️ No se encontraron recetas directas afectadas por este insumo.")
-else:
-    st.info("Cargando base de datos...")
