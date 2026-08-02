@@ -106,6 +106,14 @@ def normalizar_texto(val):
         return ""
     return str(val).strip()
 
+def limpiar_clave(val):
+    """Limpia códigos y nombres eliminando ceros a la izquierda, guiones y caracteres especiales para asegurar coincidencias."""
+    s = str(val).upper().strip()
+    s = re.sub(r"^\[|\]$", "", s) # Quita corchetes si existen
+    s = re.sub(r"^0+", "", s)     # Quita ceros iniciales (ej. 01-01-2003 -> 1-01-2003)
+    s = re.sub(r"[^\w\s]", "", s)  # Quita guiones o símbolos
+    return re.sub(r"\s+", " ", s).strip()
+
 def buscar_valor_columna(df_row, lista_palabras_clave):
     for col in df_row.index:
         col_upper = str(col).strip().upper()
@@ -132,7 +140,7 @@ modo_app = st.sidebar.radio(
 st.sidebar.divider()
 
 # ------------------------------------------
-# MODO 1: SIMULACIÓN FINANCIERA (LÓGICA EXACTA QUE FUNCIONABA)
+# MODO 1: SIMULACIÓN FINANCIERA MULTINIVEL (CORREGIDO Y FLEXIBLE)
 # ------------------------------------------
 if modo_app == "🍰 Simulación Financiera Multinivel":
     st.markdown("## 🍰 Simulación Financiera Proporcional")
@@ -189,72 +197,78 @@ if modo_app == "🍰 Simulación Financiera Multinivel":
             if abs(dif_precio_unitario) < 0.001:
                 st.info("💡 Modifica el **'Nuevo precio simulado'** arriba para ver el impacto en costos.")
             else:
-                # Cargar todas las capas de recetas
                 df_recetas_n1 = cargar_pestaña("Recetas_N1")
                 df_recetas_n2 = cargar_pestaña("Recetas_N2")
                 df_recetas_n3 = cargar_pestaña("Recetas_N3")
                 df_lista_n3 = cargar_pestaña("Lista_N3")
 
-                cod_target_clean = codigo_target.upper().strip()
-                nom_target_clean = articulo_mostrar.upper().strip()
+                cod_target_clean = limpiar_clave(codigo_target)
+                nom_target_clean = limpiar_clave(articulo_mostrar)
 
-                def es_coincidente(cod_row, nom_row):
-                    if cod_target_clean and cod_target_clean == str(cod_row).upper().strip():
+                def Coincide(cod_row, nom_row):
+                    c_clean = limpiar_clave(cod_row)
+                    n_clean = limpiar_clave(nom_row)
+                    if cod_target_clean and (cod_target_clean == c_clean or cod_target_clean in n_clean):
                         return True
-                    if nom_target_clean and nom_target_clean in str(nom_row).upper().strip():
+                    if nom_target_clean and (nom_target_clean in n_clean or n_clean in nom_target_clean):
                         return True
                     return False
 
-                # 1. Rastrear en N1
-                subrecetas_n1_afectadas = {}
+                # 1. Rastrear insumo en N1
+                subrecetas_n1 = {}
                 for _, r in df_recetas_n1.iterrows():
-                    nom_padre = normalizar_texto(r.iloc[0])
-                    nom_ins = normalizar_texto(r.iloc[1])
+                    padre = normalizar_texto(r.iloc[0])
+                    insumo = normalizar_texto(r.iloc[1])
                     cod_ins = normalizar_texto(r.iloc[2]) if len(r) > 2 else ""
                     cant = extraer_num(r.iloc[4]) if len(r) > 4 else 0.0
 
-                    if es_coincidente(cod_ins, nom_ins) and nom_padre and cant > 0:
-                        subrecetas_n1_afectadas[nom_padre.upper()] = subrecetas_n1_afectadas.get(nom_padre.upper(), 0.0) + cant
+                    if Coincide(cod_ins, insumo) and padre and cant > 0:
+                        subrecetas_n1[limpiar_clave(padre)] = subrecetas_n1.get(limpiar_clave(padre), 0.0) + cant
 
-                # 2. Rastrear en N2
-                subrecetas_n2_afectadas = {}
+                # 2. Rastrear insumo o N1 en N2
+                subrecetas_n2 = {}
                 for _, r in df_recetas_n2.iterrows():
-                    nom_padre = normalizar_texto(r.iloc[0])
-                    nom_ins = normalizar_texto(r.iloc[1])
+                    padre = normalizar_texto(r.iloc[0])
+                    insumo = normalizar_texto(r.iloc[1])
                     cod_ins = normalizar_texto(r.iloc[2]) if len(r) > 2 else ""
                     cant = extraer_num(r.iloc[4]) if len(r) > 4 else 0.0
 
-                    # Coincidencia directa del insumo o de una subreceta N1
-                    if es_coincidente(cod_ins, nom_ins):
-                        subrecetas_n2_afectadas[nom_padre.upper()] = subrecetas_n2_afectadas.get(nom_padre.upper(), 0.0) + cant
-                    elif nom_ins.upper() in subrecetas_n1_afectadas:
-                        factor_n1 = subrecetas_n1_afectadas[nom_ins.upper()]
-                        subrecetas_n2_afectadas[nom_padre.upper()] = subrecetas_n2_afectadas.get(nom_padre.upper(), 0.0) + (cant * factor_n1)
-
-                # 3. Rastrear en N3 (Productos Terminados)
-                consumo_total_n3 = {}
-                for _, r in df_recetas_n3.iterrows():
-                    nom_padre = normalizar_texto(r.iloc[0])
-                    nom_ins = normalizar_texto(r.iloc[1])
-                    cod_ins = normalizar_texto(r.iloc[2]) if len(r) > 2 else ""
-                    cant = extraer_num(r.iloc[4]) if len(r) > 4 else 0.0
-
-                    if not nom_padre or cant <= 0:
+                    if not padre or cant <= 0:
                         continue
 
-                    # Directo insumo base
-                    if es_coincidente(cod_ins, nom_ins):
-                        consumo_total_n3[nom_padre] = consumo_total_n3.get(nom_padre, 0.0) + cant
-                    # A través de N1
-                    elif nom_ins.upper() in subrecetas_n1_afectadas:
-                        factor = subrecetas_n1_afectadas[nom_ins.upper()]
-                        consumo_total_n3[nom_padre] = consumo_total_n3.get(nom_padre, 0.0) + (cant * factor)
-                    # A través de N2
-                    elif nom_ins.upper() in subrecetas_n2_afectadas:
-                        factor = subrecetas_n2_afectadas[nom_ins.upper()]
-                        consumo_total_n3[nom_padre] = consumo_total_n3.get(nom_padre, 0.0) + (cant * factor)
+                    ins_clean = limpiar_clave(insumo)
+                    padre_clean = limpiar_clave(padre)
 
-                # 4. Construir tabla final cruzando con Lista_N3
+                    if Coincide(cod_ins, insumo):
+                        subrecetas_n2[padre_clean] = subrecetas_n2.get(padre_clean, 0.0) + cant
+                    elif ins_clean in subrecetas_n1:
+                        factor = subrecetas_n1[ins_clean]
+                        subrecetas_n2[padre_clean] = subrecetas_n2.get(padre_clean, 0.0) + (cant * factor)
+
+                # 3. Rastrear en N3 (Insumo directo, N1 o N2)
+                consumos_n3 = {}
+                for _, r in df_recetas_n3.iterrows():
+                    padre = normalizar_texto(r.iloc[0])
+                    insumo = normalizar_texto(r.iloc[1])
+                    cod_ins = normalizar_texto(r.iloc[2]) if len(r) > 2 else ""
+                    cant = extraer_num(r.iloc[4]) if len(r) > 4 else 0.0
+
+                    if not padre or cant <= 0:
+                        continue
+
+                    ins_clean = limpiar_clave(insumo)
+                    padre_clean = limpiar_clave(padre)
+
+                    if Coincide(cod_ins, insumo):
+                        consumos_n3[padre_clean] = consumos_n3.get(padre_clean, 0.0) + cant
+                    elif ins_clean in subrecetas_n1:
+                        factor = subrecetas_n1[ins_clean]
+                        consumos_n3[padre_clean] = consumos_n3.get(padre_clean, 0.0) + (cant * factor)
+                    elif ins_clean in subrecetas_n2:
+                        factor = subrecetas_n2[ins_clean]
+                        consumos_n3[padre_clean] = consumos_n3.get(padre_clean, 0.0) + (cant * factor)
+
+                # 4. Generar tabla cruzando con Lista_N3
                 filas_resultado = []
                 col_nom_l3 = df_lista_n3.columns[0]
                 col_cod_l3 = df_lista_n3.columns[1] if len(df_lista_n3.columns) > 1 else col_nom_l3
@@ -262,9 +276,10 @@ if modo_app == "🍰 Simulación Financiera Multinivel":
                 for _, r in df_lista_n3.iterrows():
                     nom_prod = normalizar_texto(r[col_nom_l3])
                     cod_prod = normalizar_texto(r[col_cod_l3])
+                    prod_clean = limpiar_clave(nom_prod)
 
-                    if nom_prod in consumo_total_n3:
-                        cant_usada = consumo_total_n3[nom_prod]
+                    if prod_clean in consumos_n3:
+                        cant_usada = consumos_n3[prod_clean]
                         incremento_costo = cant_usada * dif_precio_unitario
 
                         costo_orig = buscar_valor_columna(r, ["Costo Total N3", "Costo R3", "Costo Total", "Costo"])
