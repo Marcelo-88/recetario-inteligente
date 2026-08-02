@@ -15,12 +15,21 @@ st.divider()
 ID_HOJA = "1Y8Dzxl_1jVCUrceAQVfSc94RNugo2cgRsrHJwXLwmU4"
 
 
-@st.cache_data(ttl=30)  # TTL corto para refrescar cambios rápidos del Drive
+@st.cache_data(ttl=15)
 def cargar_pestaña(nombre_pestaña):
     url = f"https://docs.google.com/spreadsheets/d/{ID_HOJA}/gviz/tq?tqx=out:csv&sheet={nombre_pestaña}"
-    df = pd.read_csv(url)
+    df = pd.read_csv(url, dtype=str)  # Forzar todo a STRING para no perder ceros
     df.columns = df.columns.str.strip()
     return df.fillna("")
+
+
+# Función para normalizar códigos (quita espacios, convierte a mayúsculas)
+def limpiar_codigo(val):
+    if pd.isna(val) or str(val).strip() == "":
+        return ""
+    # Quita decimales de floats convertidos a string tipo '100.0'
+    val_str = str(val).strip().split(".")[0]
+    return val_str.upper().strip()
 
 
 # 1. Menú Principal
@@ -76,7 +85,7 @@ if modo_app == "📋 Explorador de Tablas":
         st.error(f"Error al cargar {pestaña_activa}: {e}")
 
 # -------------------------------------------------------------
-# MÓDULO 2: SIMULACIÓN FINANCIERA MULTINIVEL (POR CÓDIGOS ERP)
+# MÓDULO 2: SIMULACIÓN FINANCIERA MULTINIVEL
 # -------------------------------------------------------------
 elif modo_app == "💥 Simulación Financiera Multinivel":
     st.header("💥 Simulación de Impacto en Costos (Vía Códigos ERP)")
@@ -95,14 +104,22 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
         df_lista_n2 = cargar_pestaña("Listas_N2")
         df_lista_n3 = cargar_pestaña("Lista_N3")
 
-        # Identificar columnas en Mermas/Materia Prima
-        col_codigo = next((c for c in df_mermas.columns if "COD" in c.upper()), df_mermas.columns[1])
-        col_articulo = next((c for c in df_mermas.columns if any(k in c.upper() for k in ["ARTICULO", "NOMBRE", "DESCRIPCION", "RECETARIO"])), df_mermas.columns[2])
+        # Identificar columnas
+        def obtener_col_por_patron(df, palabras_clave, default_idx=0):
+            for c in df.columns:
+                c_up = c.upper()
+                if any(k in c_up for k in palabras_clave):
+                    return c
+            return df.columns[default_idx] if len(df.columns) > default_idx else df.columns[0]
 
+        col_codigo_mermas = obtener_col_por_patron(df_mermas, ["COD"], 1)
+        col_articulo_mermas = obtener_col_por_patron(df_mermas, ["ARTICULO", "NOMBRE", "DESCRIPCION", "RECETARIO"], 2)
+
+        df_mermas["COD_CLEAN"] = df_mermas[col_codigo_mermas].apply(limpiar_codigo)
         df_mermas["COMBO_MOSTRAR"] = (
-            df_mermas[col_codigo].astype(str).str.strip()
+            df_mermas["COD_CLEAN"]
             + " | "
-            + df_mermas[col_articulo].astype(str).str.strip()
+            + df_mermas[col_articulo_mermas].astype(str).str.strip()
         )
 
         lista_opciones = sorted(
@@ -118,8 +135,8 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
         if opcion_elegida:
             datos_insumo = df_mermas[df_mermas["COMBO_MOSTRAR"] == opcion_elegida].iloc[0]
 
-            codigo_target = str(datos_insumo[col_codigo]).strip()
-            articulo_target = str(datos_insumo[col_articulo]).strip()
+            codigo_target = datos_insumo["COD_CLEAN"]
+            articulo_target = str(datos_insumo[col_articulo_mermas]).strip()
 
             costo_actual = 0.0
             for col in df_mermas.columns:
@@ -141,7 +158,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 nuevo_precio = st.number_input(
                     "Nuevo precio simulado (Bs):",
                     min_value=0.0,
-                    value=float(costo_actual * 1.20) if costo_actual > 0 else 10.0,
+                    value=float(costo_actual * 1.20) if costo_actual > 0 else 25.0,
                     step=1.0,
                 )
             with c3:
@@ -155,7 +172,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
 
             st.divider()
 
-            # --- FUNCIONES AUXILIARES DE EXTRACCIÓN ---
+            # Extraer números
             def extraer_num(val):
                 if pd.isna(val) or val == "":
                     return 0.0
@@ -164,13 +181,6 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                     return float(cleaned) if cleaned else 0.0
                 except:
                     return 0.0
-
-            def obtener_col_por_patron(df, palabras_clave, default_idx=0):
-                for c in df.columns:
-                    c_up = c.upper()
-                    if any(k in c_up for k in palabras_clave):
-                        return c
-                return df.columns[default_idx] if len(df.columns) > default_idx else df.columns[0]
 
             # Detectar columnas clave en recetas
             col_cod_receta_n1 = obtener_col_por_patron(df_recetas_n1, ["COD_RECETA", "CODIGO_RECETA", "RECETA_COD"], 0)
@@ -200,14 +210,25 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
             col_lista_nom_n3 = obtener_col_por_patron(df_lista_n3, ["NOMBRE", "PRODUCTO", "RECETA", "DESCRIPCION"], 1)
             col_lista_costo_n3 = obtener_col_por_patron(df_lista_n3, ["COSTO", "PRECIO"], 2)
 
-            # -------------------------------------------------------------
-            # EVALUACIÓN NIVEL N1 (SUBRECETAS BASE)
-            # -------------------------------------------------------------
-            impactos_n1 = {}  # {cod_n1: incremento_unitario_por_kg_o_unidad}
+            # Limpieza de DataFrames para cruces exactos
+            df_recetas_n1["COD_RECETA_CLEAN"] = df_recetas_n1[col_cod_receta_n1].apply(limpiar_codigo)
+            df_recetas_n1["COD_INSUMO_CLEAN"] = df_recetas_n1[col_cod_insumo_n1].apply(limpiar_codigo)
+
+            df_recetas_n2["COD_RECETA_CLEAN"] = df_recetas_n2[col_cod_receta_n2].apply(limpiar_codigo)
+            df_recetas_n2["COD_INSUMO_CLEAN"] = df_recetas_n2[col_cod_insumo_n2].apply(limpiar_codigo)
+
+            df_recetas_n3["COD_RECETA_CLEAN"] = df_recetas_n3[col_cod_receta_n3].apply(limpiar_codigo)
+            df_recetas_n3["COD_INSUMO_CLEAN"] = df_recetas_n3[col_cod_insumo_n3].apply(limpiar_codigo)
+
+            df_lista_n1["COD_CLEAN"] = df_lista_n1[col_lista_cod_n1].apply(limpiar_codigo)
+            df_lista_n2["COD_CLEAN"] = df_lista_n2[col_lista_cod_n2].apply(limpiar_codigo)
+            df_lista_n3["COD_CLEAN"] = df_lista_n3[col_lista_cod_n3].apply(limpiar_codigo)
+
+            # --- EVALUACIÓN NIVEL N1 ---
+            impactos_n1 = {}
             filas_resumen_n1 = []
 
-            for cod_receta, df_ing in df_recetas_n1.groupby(col_cod_receta_n1):
-                cod_n1 = str(cod_receta).strip()
+            for cod_n1, df_ing in df_recetas_n1.groupby("COD_RECETA_CLEAN"):
                 if not cod_n1:
                     continue
 
@@ -215,14 +236,13 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 cant_insumo_usada = 0.0
 
                 for _, row in df_ing.iterrows():
-                    cod_insumo_row = str(row[col_cod_insumo_n1]).strip()
-                    if cod_insumo_row == codigo_target:
+                    if row["COD_INSUMO_CLEAN"] == codigo_target:
                         cant = extraer_num(row[col_cant_n1])
                         cant_insumo_usada += cant
                         inc_total_receta += cant * dif_precio
 
                 if inc_total_receta > 0:
-                    row_lista = df_lista_n1[df_lista_n1[col_lista_cod_n1].astype(str).str.strip() == cod_n1]
+                    row_lista = df_lista_n1[df_lista_n1["COD_CLEAN"] == cod_n1]
                     nom_n1 = cod_n1
                     costo_base = 0.0
                     peso_batch = 1.0
@@ -250,14 +270,11 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
 
             resumen_l1 = pd.DataFrame(filas_resumen_n1)
 
-            # -------------------------------------------------------------
-            # EVALUACIÓN NIVEL N2 (RELLENOS / INTERMEDIOS)
-            # -------------------------------------------------------------
+            # --- EVALUACIÓN NIVEL N2 ---
             impactos_n2 = {}
             filas_resumen_n2 = []
 
-            for cod_receta, df_ing in df_recetas_n2.groupby(col_cod_receta_n2):
-                cod_n2 = str(cod_receta).strip()
+            for cod_n2, df_ing in df_recetas_n2.groupby("COD_RECETA_CLEAN"):
                 if not cod_n2:
                     continue
 
@@ -265,20 +282,18 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 cant_referencial = 0.0
 
                 for _, row in df_ing.iterrows():
-                    cod_comp = str(row[col_cod_insumo_n2]).strip()
+                    cod_comp = row["COD_INSUMO_CLEAN"]
                     cant = extraer_num(row[col_cant_n2])
 
-                    # Directo por Materia Prima
                     if cod_comp == codigo_target:
                         inc_total_receta += cant * dif_precio
                         cant_referencial += cant
-                    # A través de Subreceta N1
                     elif cod_comp in impactos_n1:
                         inc_total_receta += cant * impactos_n1[cod_comp]
                         cant_referencial += cant
 
                 if inc_total_receta > 0:
-                    row_lista = df_lista_n2[df_lista_n2[col_lista_cod_n2].astype(str).str.strip() == cod_n2]
+                    row_lista = df_lista_n2[df_lista_n2["COD_CLEAN"] == cod_n2]
                     nom_n2 = cod_n2
                     costo_base = 0.0
                     peso_batch = 1.0
@@ -306,13 +321,10 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
 
             resumen_l2 = pd.DataFrame(filas_resumen_n2)
 
-            # -------------------------------------------------------------
-            # EVALUACIÓN NIVEL N3 (PRODUCTOS FINALES)
-            # -------------------------------------------------------------
+            # --- EVALUACIÓN NIVEL N3 ---
             filas_resumen_n3 = []
 
-            for cod_receta, df_ing in df_recetas_n3.groupby(col_cod_receta_n3):
-                cod_n3 = str(cod_receta).strip()
+            for cod_n3, df_ing in df_recetas_n3.groupby("COD_RECETA_CLEAN"):
                 if not cod_n3:
                     continue
 
@@ -320,24 +332,21 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 cant_referencial = 0.0
 
                 for _, row in df_ing.iterrows():
-                    cod_comp = str(row[col_cod_insumo_n3]).strip()
+                    cod_comp = row["COD_INSUMO_CLEAN"]
                     cant = extraer_num(row[col_cant_n3])
 
-                    # Directo por Materia Prima / Empaque
                     if cod_comp == codigo_target:
                         inc_total_receta += cant * dif_precio
                         cant_referencial += cant
-                    # Vía Subreceta N1
                     elif cod_comp in impactos_n1:
                         inc_total_receta += cant * impactos_n1[cod_comp]
                         cant_referencial += cant
-                    # Vía Subreceta N2
                     elif cod_comp in impactos_n2:
                         inc_total_receta += cant * impactos_n2[cod_comp]
                         cant_referencial += cant
 
                 if inc_total_receta > 0:
-                    row_lista = df_lista_n3[df_lista_n3[col_lista_cod_n3].astype(str).str.strip() == cod_n3]
+                    row_lista = df_lista_n3[df_lista_n3["COD_CLEAN"] == cod_n3]
                     nom_n3 = cod_n3
                     costo_base = 0.0
 
@@ -358,18 +367,17 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
 
             resumen_l3 = pd.DataFrame(filas_resumen_n3)
 
-            # -------------------------------------------------------------
-            # PRESENTACIÓN VISUAL
-            # -------------------------------------------------------------
+            # --- PRESENTACIÓN VISUAL ---
             st.subheader(
                 f"📊 Comparativa Ejecutiva de Productos Afectados por: [{codigo_target}] {articulo_target}"
             )
 
-            resumen_tabs1, resumen_tabs2, resumen_tabs3 = st.tabs(
+            resumen_tabs1, resumen_tabs2, resumen_tabs3, tab_debug = st.tabs(
                 [
                     "🟢 Productos Finales (Lista_N3)",
                     "🟠 Rellenos / Intermedios (Listas_N2)",
                     "🔴 Sub-Recetas Base (Lista_N1)",
+                    "🔍 Diagnóstico de Códigos",
                 ]
             )
 
@@ -393,6 +401,34 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                     st.dataframe(resumen_l1, use_container_width=True)
                 else:
                     st.info("No se encontraron sub-recetas N1 afectadas por este insumo.")
+
+            with tab_debug:
+                st.write("### 🔍 Verificación de Columnas y Códigos Encontrados")
+                st.write(f"**Código Target Simulado:** `{codigo_target}`")
+                
+                col_d1, col_d2, col_d3 = st.columns(3)
+                with col_d1:
+                    st.caption("Pestaña Recetas_N1")
+                    st.write(f"Columna Receta: `{col_cod_receta_n1}`")
+                    st.write(f"Columna Insumo: `{col_cod_insumo_n1}`")
+                    coincidencias_n1 = df_recetas_n1[df_recetas_n1["COD_INSUMO_CLEAN"] == codigo_target]
+                    st.write(f"Coincidencias encontradas: **{len(coincidencias_n1)}**")
+                    if not coincidencias_n1.empty:
+                        st.dataframe(coincidencias_n1[[col_cod_receta_n1, col_cod_insumo_n1, col_cant_n1]])
+
+                with col_d2:
+                    st.caption("Pestaña Recetas_N2")
+                    st.write(f"Columna Receta: `{col_cod_receta_n2}`")
+                    st.write(f"Columna Insumo: `{col_cod_insumo_n2}`")
+                    coincidencias_n2 = df_recetas_n2[df_recetas_n2["COD_INSUMO_CLEAN"] == codigo_target]
+                    st.write(f"Coincidencias encontradas: **{len(coincidencias_n2)}**")
+
+                with col_d3:
+                    st.caption("Pestaña Recetas_N3")
+                    st.write(f"Columna Receta: `{col_cod_receta_n3}`")
+                    st.write(f"Columna Insumo: `{col_cod_insumo_n3}`")
+                    coincidencias_n3 = df_recetas_n3[df_recetas_n3["COD_INSUMO_CLEAN"] == codigo_target]
+                    st.write(f"Coincidencias encontradas: **{len(coincidencias_n3)}**")
 
     except Exception as e:
         st.error(f"Error durante el cálculo de la simulación: {e}")
