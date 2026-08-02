@@ -1,79 +1,3 @@
-import pandas as pd
-import streamlit as st
-
-st.set_page_config(
-    page_title="Recetario Inteligente & Centro de Control",
-    page_icon="🍳",
-    layout="wide",
-)
-
-st.title("🍳 Recetario Inteligente & Centro de Control")
-st.caption("Simulación Financiera Ejecutiva y Efecto Dominó (Lista N1 ➔ N2 ➔ N3)")
-st.divider()
-
-ID_HOJA = "1Y8Dzxl_1jVCUrceAQVfSc94RNugo2cgRsrHJwXLwmU4"
-
-
-@st.cache_data(ttl=60)
-def cargar_pestaña(nombre_pestaña):
-    url = f"https://docs.google.com/spreadsheets/d/{ID_HOJA}/gviz/tq?tqx=out:csv&sheet={nombre_pestaña}"
-    df = pd.read_csv(url)
-    df.columns = df.columns.str.strip()
-    return df
-
-
-# 1. Menú Principal
-st.sidebar.header("🕹️ Módulos")
-modo_app = st.sidebar.radio(
-    "Selecciona la función:",
-    ["📋 Explorador de Tablas", "💥 Simulación Financiera Multinivel"],
-)
-st.sidebar.divider()
-
-# -------------------------------------------------------------
-# MÓDULO 1: EXPLORADOR DE TABLAS
-# -------------------------------------------------------------
-if modo_app == "📋 Explorador de Tablas":
-    st.sidebar.header("📁 Pestañas del Recetario")
-    pestaña_activa = st.sidebar.radio(
-        "Selecciona la vista:",
-        [
-            "Recetas_N3",
-            "Lista_N3",
-            "Recetas_N2",
-            "Listas_N2",
-            "Recetas_N1",
-            "Lista_N1",
-            "Materia_Prima",
-            "Mermas_Costos",
-        ],
-    )
-
-    try:
-        with st.spinner(f"Cargando {pestaña_activa}..."):
-            df = cargar_pestaña(pestaña_activa)
-
-        st.subheader(f"📊 Vista de Datos: {pestaña_activa}")
-        busqueda = st.text_input(
-            f"🔍 Buscar en {pestaña_activa} (receta, código, ingrediente):"
-        )
-
-        if busqueda:
-            mascara = df.apply(
-                lambda row: row.astype(str)
-                .str.contains(busqueda, case=False, na=False)
-                .any(),
-                axis=1,
-            )
-            df_filtrado = df[mascara]
-            st.success(f"Se encontraron **{len(df_filtrado)}** resultados")
-            st.dataframe(df_filtrado, use_container_width=True)
-        else:
-            st.dataframe(df, use_container_width=True)
-
-    except Exception as e:
-        st.error(f"Error al cargar {pestaña_activa}: {e}")
-
 # -------------------------------------------------------------
 # MÓDULO 2: SIMULACIÓN FINANCIERA MULTINIVEL
 # -------------------------------------------------------------
@@ -165,7 +89,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
 
             st.divider()
 
-            # --- ALGORITMO DE RASTREO MULTINIVEL ---
+            # --- TÉRMINOS DE BÚSQUEDA DEL INSUMO ORIGINAL ---
             terminos_busqueda = [
                 t
                 for t in [codigo_val, recetario_val, articulo_val]
@@ -175,13 +99,12 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 and len(t) > 2
             ]
 
-            # RASTREO N1
-            terminos_n1 = terminos_busqueda
-            patron_n1 = "|".join(terminos_n1)
+            # RASTREO N1 (Filtra solo las recetas que CONTIENEN los términos del insumo)
+            patron_n1 = "|".join([r"\b" + re.escape(t) + r"\b" if t.isalnum() else re.escape(t) for t in terminos_busqueda])
             afectadas_recetas_n1 = df_recetas_n1[
                 df_recetas_n1.apply(
                     lambda r: r.astype(str)
-                    .str.contains(patron_n1, case=False, na=False)
+                    .str.contains("|".join(terminos_busqueda), case=False, na=False)
                     .any(),
                     axis=1,
                 )
@@ -194,19 +117,12 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 .tolist()
             )
 
-            # RASTREO N2
+            # RASTREO N2 (Insumo directo o Subrecetas N1 verdaderamente afectadas)
             terminos_n2 = terminos_busqueda + subrecetas_n1_nombres
-            patron_n2 = "|".join(
-                [
-                    str(t)
-                    for t in terminos_n2
-                    if str(t).strip() and str(t) != "nan"
-                ]
-            )
             afectadas_recetas_n2 = df_recetas_n2[
                 df_recetas_n2.apply(
                     lambda r: r.astype(str)
-                    .str.contains(patron_n2, case=False, na=False)
+                    .str.contains("|".join(terminos_n2), case=False, na=False)
                     .any(),
                     axis=1,
                 )
@@ -219,23 +135,12 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 .tolist()
             )
 
-            # RASTREO N3
-            terminos_n3 = (
-                terminos_busqueda
-                + subrecetas_n1_nombres
-                + subrecetas_n2_nombres
-            )
-            patron_n3 = "|".join(
-                [
-                    str(t)
-                    for t in terminos_n3
-                    if str(t).strip() and str(t) != "nan"
-                ]
-            )
+            # RASTREO N3 (Insumo directo, Subrecetas N1 o Subrecetas N2 verdaderamente afectadas)
+            terminos_n3 = terminos_busqueda + subrecetas_n1_nombres + subrecetas_n2_nombres
             afectadas_recetas_n3 = df_recetas_n3[
                 df_recetas_n3.apply(
                     lambda r: r.astype(str)
-                    .str.contains(patron_n3, case=False, na=False)
+                    .str.contains("|".join(terminos_n3), case=False, na=False)
                     .any(),
                     axis=1,
                 )
@@ -248,7 +153,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 .tolist()
             )
 
-            # --- FUNCIÓN DE CONSTRUCCIÓN DE TABLAS ---
+            # --- FUNCIÓN DE CONSTRUCCIÓN DE TABLAS (CORREGIDA) ---
             def construir_tabla_ejecutiva(
                 df_lista, df_recetas_afectadas, nombres_afectados, datos_insumo, dif_precio, terminos_simulados
             ):
@@ -258,16 +163,6 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 col_prod = df_lista.columns[0]
                 col_receta_prod = df_recetas_afectadas.columns[0]
 
-                # Detectar si el insumo simulado es EMPAQUE
-                es_empaque = False
-                for c in datos_insumo.index:
-                    if any(k in str(c).upper() for k in ["TIPO", "CATEGORIA", "CLASE", "GRUPO"]):
-                        val_tipo = str(datos_insumo[c]).strip().upper()
-                        if any(term in val_tipo for term in ["EMPAQUE", "ENVASE", "CAJA", "DOMO", "BOLSA"]):
-                            es_empaque = True
-                            break
-
-                # Filtrar la lista de precios por los productos afectados
                 df_filtrado = df_lista[
                     df_lista[col_prod].astype(str).isin(nombres_afectados)
                 ].copy()
@@ -296,7 +191,6 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                         return 0.0
 
                 filas_resumen = []
-                palabras_clave_empaque = ["EMPAQUE", "ENVASE", "CAJA", "DOMO", "BOLSA", "BASE", "CINTA", "FIDEOS"]
 
                 for _, row in df_filtrado.iterrows():
                     nombre_prod = str(row[col_prod])
@@ -307,71 +201,51 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                         df_recetas_afectadas[col_receta_prod].astype(str) == nombre_prod
                     ]
 
-                    if es_empaque:
-                        cant_empaque = 0.0
-                        for c in filas_ing.columns:
-                            if any(k in c.upper() for k in ["CANT", "UNID", "PIEZA"]):
-                                v = filas_ing[c].apply(extraer_num).sum()
-                                if v > 0:
-                                    cant_empaque += v
-                        if cant_empaque == 0:
-                            cant_empaque = 1.0
-                        
-                        impacto_bs = dif_precio * cant_empaque
-                        cantidad_usada_mostrar = cant_empaque
+                    # BUSCAR SI EL INSUMO/SUBRECETA AFECTADA ESTÁ REALMENTE EN ESTA RECETA
+                    patron_busqueda = "|".join([str(t) for t in terminos_simulados if len(str(t)) > 2])
+                    filas_especificas = filas_ing[
+                        filas_ing.apply(
+                            lambda r: r.astype(str).str.contains(patron_busqueda, case=False, na=False).any(),
+                            axis=1
+                        )
+                    ]
 
-                    else:
-                        patron_busqueda = "|".join([str(t) for t in terminos_simulados if len(str(t)) > 2])
-                        filas_especificas = filas_ing[
-                            filas_ing.apply(
-                                lambda r: r.astype(str).str.contains(patron_busqueda, case=False, na=False).any(),
-                                axis=1
-                            )
-                        ]
+                    # SI NO CONTIENE EL INSUMO EN SUS INGREDIENTES, OMITIR DE LA LISTA
+                    if filas_especificas.empty:
+                        continue
 
-                        if filas_especificas.empty:
-                            filas_especificas = filas_ing[
-                                ~filas_ing.apply(
-                                    lambda r: r.astype(str).str.contains("|".join(palabras_clave_empaque), case=False, na=False).any(),
-                                    axis=1
-                                )
-                            ]
+                    # Extraer la cantidad real usada en esta receta
+                    cantidad_usada = 0.0
+                    cols_cantidad = [
+                        c for c in filas_especificas.columns 
+                        if any(k in c.upper() for k in ["CANT", "PESO", "NETO", "UNID", "PIEZA", "KG", "GR"]) 
+                        and not any(k in c.upper() for k in ["COSTO", "PRECIO", "TOTAL", "IMPORTE"])
+                    ]
 
-                        peso_ingrediente = 0.0
-                        cols_peso = [
-                            c for c in filas_especificas.columns 
-                            if any(k in c.upper() for k in ["CANT", "PESO", "NETO", "KG", "GR"]) 
-                            and not any(k in c.upper() for k in ["COSTO", "PRECIO", "TOTAL", "IMPORTE"])
-                        ]
+                    if cols_cantidad:
+                        for c in cols_cantidad:
+                            v = filas_especificas[c].apply(extraer_num).sum()
+                            if v > 0:
+                                cantidad_usada = v
+                                break
 
-                        if cols_peso:
-                            for c in cols_peso:
-                                val_c = filas_especificas[c].apply(extraer_num).sum()
-                                if val_c > 0:
-                                    peso_ingrediente = val_c
-                                    break
+                    # Si no encuentra columna de cantidad pero sabemos que está la fila, no inventamos si no hay dato
+                    impacto_bs = dif_precio * cantidad_usada
+                    
+                    # Solo agregamos si hay un impacto real mayor a 0
+                    if impacto_bs > 0:
+                        costo_simulado = costo_base + impacto_bs
+                        var_porc = (impacto_bs / costo_base * 100) if costo_base > 0 else 0.0
 
-                        if peso_ingrediente <= 0 or peso_ingrediente > 1.5:
-                            if "Beso de chocolate" in nombre_prod:
-                                peso_ingrediente = 0.131
-                            else:
-                                peso_ingrediente = 0.130
-
-                        impacto_bs = dif_precio * peso_ingrediente
-                        cantidad_usada_mostrar = peso_ingrediente
-
-                    costo_simulado = costo_base + impacto_bs
-                    var_porc = (impacto_bs / costo_base * 100) if costo_base > 0 else 0.0
-
-                    filas_resumen.append({
-                        "Producto / Subreceta": nombre_prod,
-                        "Estado": estado,
-                        "Cantidad Usada": f"{cantidad_usada_mostrar:.3f}",
-                        "Costo Actual": f"Bs {costo_base:.2f}",
-                        "Costo Simulado": f"Bs {costo_simulado:.2f}",
-                        "Variación (Bs)": f"+Bs {impacto_bs:.2f}",
-                        "Variación (%)": f"+{var_porc:.1f}%",
-                    })
+                        filas_resumen.append({
+                            "Producto / Subreceta": nombre_prod,
+                            "Estado": estado,
+                            "Cantidad Usada": f"{cantidad_usada:.3f}",
+                            "Costo Actual": f"Bs {costo_base:.2f}",
+                            "Costo Simulado": f"Bs {costo_simulado:.2f}",
+                            "Variación (Bs)": f"+Bs {impacto_bs:.2f}",
+                            "Variación (%)": f"+{var_porc:.1f}%",
+                        })
 
                 return pd.DataFrame(filas_resumen)
 
