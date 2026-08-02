@@ -11,25 +11,25 @@ st.set_page_config(
 
 st.title("🍰 Recetario Inteligente y Simulación de Costos")
 
-# --- CONEXIÓN DIRECTA A GOOGLE SHEETS (DRIVE) ---
+# --- CONEXIÓN A GOOGLE SHEETS CON GIDs VERIFICADOS ---
 SHEET_ID = "1Y8Dzxl_1jVCUrceAQVfSc94RNugo2cgRsrHJwXLwmU4"
 
-# URLs de exportación CSV para cada pestaña por su GID
-URL_LISTA_N3 = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=563862181"
-URL_RECETAS_N3 = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=1120286801"
-URL_MERMAS = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=0"
+URL_LISTA_N3 = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=557327778"
+URL_RECETAS_N3 = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=563862181"
+URL_MERMAS = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=2105746899"
 
 # --- FUNCIONES DE CÁLCULO ---
 
 def calcular_pesos_totales_n3(df_recetas_n3):
     """
-    Suma dinámicamente el peso de todos los INGREDIENTES comestibles por producto,
+    Suma el peso de todos los INGREDIENTES comestibles por producto en N3,
     ignorando los ítems categorizados como 'Empaque'.
     """
     if df_recetas_n3.empty:
         return {}
         
     df_ing = df_recetas_n3.copy()
+    # Limpiar espacios en nombres de columnas
     df_ing.columns = df_ing.columns.str.strip()
     
     if 'Categoria' in df_ing.columns:
@@ -48,16 +48,13 @@ def calcular_pesos_totales_n3(df_recetas_n3):
 
 
 def construir_tabla_ejecutiva(df_lista3, df_recetas_n3, elemento_afectado, incremento_base_bs):
-    """
-    Genera la tabla ejecutiva comparativa en Streamlit.
-    Calcula automáticamente si el ítem es Ingrediente o Empaque.
-    """
     if df_lista3.empty or df_recetas_n3.empty or not elemento_afectado:
         st.warning("⚠️ Selecciona un insumo para ver la simulación.")
         return pd.DataFrame()
 
     df_lista3 = df_lista3.copy()
     df_recetas_n3 = df_recetas_n3.copy()
+    
     df_lista3.columns = df_lista3.columns.str.strip()
     df_recetas_n3.columns = df_recetas_n3.columns.str.strip()
     
@@ -104,6 +101,7 @@ def construir_tabla_ejecutiva(df_lista3, df_recetas_n3, elemento_afectado, incre
                 cant_item = cant_mp + cant_n1 + cant_n2
                 cantidad_usada_registrada += cant_item
 
+                # Lógica: Empaques impactan directo por unidad/uso; Ingredientes prorratean según peso
                 if cat_ingrediente == 'Empaque':
                     impacto_total_bs += incremento_base_bs * cant_item
                 else:
