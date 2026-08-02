@@ -9,7 +9,7 @@ st.set_page_config(
 )
 
 st.title("🍳 Recetario Inteligente & Centro de Control")
-st.caption("Simulación Financiera Multinivel - Costo Unitario/Litro Ponderado por Rendimiento")
+st.caption("Simulación Financiera - Impacto Unitario por Kilo/Unidad")
 st.divider()
 
 ID_HOJA = "1Y8Dzxl_1jVCUrceAQVfSc94RNugo2cgRsrHJwXLwmU4"
@@ -76,18 +76,12 @@ def buscar_columna_costo_master(df, nivel="3"):
 
 
 def obtener_rendimiento_total_batch(row_values):
-    """
-    Obtiene el total de gramos/unidades producidas en el batch N1 o N2.
-    Si las cantidades de ingredientes están distribuidas en la fila, las suma.
-    """
     cantidades = []
     for val in row_values[1:]:
         num = extraer_num(val)
         if num > 0:
             cantidades.append(num)
-
     total = sum(cantidades)
-    # Evita división entre cero; si no hay cantidades, asume 1 kg/litro
     return total if total > 0 else 1.0
 
 
@@ -140,7 +134,7 @@ if modo_app == "📋 Explorador de Tablas":
 
 elif modo_app == "💥 Simulación Financiera Multinivel":
     st.header("💥 Simulación Financiera Multinivel Proporcional")
-    st.info("Simulación por Costo Unitario/Litro y Ponderación de Relleno")
+    st.info("Visualización estandarizada por Kilo / Unidad para N1, N2 y N3")
 
     try:
         df_mermas = cargar_pestaña("Mermas_Costos")
@@ -193,11 +187,11 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 st.caption(f"Insumo: {articulo_mostrar}")
             with c2:
                 nuevo_precio_unitario = st.number_input(
-                    "Nuevo precio por Litro/Unidad (Bs):",
+                    "Nuevo precio simulado por Litro/Kg (Bs):",
                     min_value=0.0,
                     value=float(costo_actual_unitario + 1.00)
                     if costo_actual_unitario > 0
-                    else 20.59,
+                    else 20.0,
                     step=0.10,
                 )
             with c3:
@@ -210,13 +204,13 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                     else 0.0
                 )
                 st.metric(
-                    "Variación por Litro/Kg",
+                    "Variación Directa",
                     f"+Bs {dif_precio_unitario:.2f}",
                     delta=f"{porc_inc:.1f}%",
                 )
 
             st.caption(
-                f"📌 Costo base por litro en Mermas_Costos: **Bs {costo_actual_unitario:.2f}**"
+                f"📌 Costo base en Mermas_Costos: **Bs {costo_actual_unitario:.2f}**"
             )
             st.divider()
 
@@ -228,8 +222,9 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 col_costo = buscar_columna_costo_master(df_lista, nivel)
 
                 query_norm = normalizar_cod(busqueda_str)
-                query_upper = str(busqueda_str).strip().upper()
+                query_clean = str(busqueda_str).strip().upper()
 
+                # Búsqueda flexible por código o por nombre
                 match = df_lista[
                     (df_lista[col_cod].apply(normalizar_cod) == query_norm)
                     | (
@@ -237,7 +232,14 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                         .astype(str)
                         .str.strip()
                         .str.upper()
-                        == query_upper
+                        == query_clean
+                    )
+                    | (
+                        df_lista[col_cod]
+                        .astype(str)
+                        .str.strip()
+                        .str.upper()
+                        == query_clean
                     )
                 ]
 
@@ -246,11 +248,11 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                     c_show = limpiar_cod_mostrar(match.iloc[0][col_cod])
                     n_show = str(match.iloc[0][col_nom]).strip()
                     return c_base, c_show, n_show
+
                 return 0.0, "-", str(busqueda_str).strip()
 
-            # --- 1. IMPACTO EN RECETAS N1 (Sub-recetas base) ---
-            impactos_n1_batch = {}
-            impactos_n1_por_gramo = {}
+            # --- 1. RECETAS N1 (Sub-Recetas Base) ---
+            impactos_n1_kilo = {}
 
             for _, row in df_recetas_n1.iterrows():
                 vals = [str(v).strip() for v in row.values]
@@ -270,39 +272,39 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                             cant_aceite = num
                             break
 
-                    # Variación del Batch entero de N1
                     inc_batch = cant_aceite * dif_precio_unitario
                     rendimiento_batch = obtener_rendimiento_total_batch(vals)
 
-                    impactos_n1_batch[receta_padre_norm] = (
-                        impactos_n1_batch.get(receta_padre_norm, 0.0)
-                        + inc_batch
-                    )
-                    # Variación por gramo/unidad del N1 producido
-                    impactos_n1_por_gramo[receta_padre_norm] = (
-                        inc_batch / rendimiento_batch
+                    # Guardamos la variación expresada por Kilo / Unidad
+                    var_por_kilo = inc_batch / rendimiento_batch
+                    impactos_n1_kilo[receta_padre_norm] = (
+                        impactos_n1_kilo.get(receta_padre_norm, 0.0)
+                        + var_por_kilo
                     )
 
             filas_n1 = []
-            for cod_norm, inc_batch in impactos_n1_batch.items():
-                costo_base, cod_show, nom_show = consultar_master_gen(
+            for cod_norm, var_kilo in impactos_n1_kilo.items():
+                costo_base_kg, cod_show, nom_show = consultar_master_gen(
                     df_lista_n1, cod_norm, "1"
                 )
+                costo_sim_kg = costo_base_kg + var_kilo
                 porc_var = (
-                    (inc_batch / costo_base * 100) if costo_base > 0 else 0.0
+                    (var_kilo / costo_base_kg * 100)
+                    if costo_base_kg > 0
+                    else 0.0
                 )
+
                 filas_n1.append({
-                    "Código Receta N1": cod_show,
+                    "Código N1": cod_show,
                     "Nombre Sub-Receta": nom_show,
-                    "Costo Actual Batch": f"Bs {costo_base:.2f}",
-                    "Costo Simulado Batch": f"Bs {(costo_base + inc_batch):.2f}",
-                    "Variación Batch (Bs)": f"+Bs {inc_batch:.2f}",
+                    "Costo Actual / Kg": f"Bs {costo_base_kg:.2f}",
+                    "Costo Simulado / Kg": f"Bs {costo_sim_kg:.2f}",
+                    "Variación / Kg (Bs)": f"+Bs {var_kilo:.2f}",
                     "Variación (%)": f"+{porc_var:.1f}%",
                 })
 
-            # --- 2. IMPACTO EN RECETAS N2 (Rellenos / Intermedios) ---
-            impactos_n2_batch = {}
-            impactos_n2_por_gramo = {}
+            # --- 2. RECETAS N2 (Rellenos / Intermedios) ---
+            impactos_n2_kilo = {}
 
             for _, row in df_recetas_n2.iterrows():
                 vals = [str(v).strip() for v in row.values]
@@ -315,7 +317,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 row_norms = [normalizar_cod(v) for v in vals]
                 inc_batch_n2 = 0.0
 
-                # MP Directa en N2
+                # Aceite Directo en N2
                 if codigo_target_norm in row_norms[1:]:
                     idx = row_norms[1:].index(codigo_target_norm) + 1
                     cant = 0.0
@@ -326,8 +328,8 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                             break
                     inc_batch_n2 += cant * dif_precio_unitario
 
-                # N1 consumido en N2 (ponderado por gramo/unidad consumida)
-                for cod_n1_norm, inc_gramo_n1 in impactos_n1_por_gramo.items():
+                # N1 consumido en N2
+                for cod_n1_norm, var_kilo_n1 in impactos_n1_kilo.items():
                     if cod_n1_norm in row_norms[1:]:
                         idx = row_norms[1:].index(cod_n1_norm) + 1
                         cant_n1 = 0.0
@@ -336,36 +338,38 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                             if num > 0:
                                 cant_n1 = num
                                 break
-                        inc_batch_n2 += cant_n1 * inc_gramo_n1
+                        inc_batch_n2 += cant_n1 * var_kilo_n1
 
                 if inc_batch_n2 > 0:
                     rendimiento_batch_n2 = obtener_rendimiento_total_batch(vals)
-                    impactos_n2_batch[receta_padre_norm] = (
-                        impactos_n2_batch.get(receta_padre_norm, 0.0)
-                        + inc_batch_n2
-                    )
-                    impactos_n2_por_gramo[receta_padre_norm] = (
-                        inc_batch_n2 / rendimiento_batch_n2
+                    var_por_kilo_n2 = inc_batch_n2 / rendimiento_batch_n2
+                    impactos_n2_kilo[receta_padre_norm] = (
+                        impactos_n2_kilo.get(receta_padre_norm, 0.0)
+                        + var_por_kilo_n2
                     )
 
             filas_n2 = []
-            for cod_norm, inc_batch in impactos_n2_batch.items():
-                costo_base, cod_show, nom_show = consultar_master_gen(
+            for cod_norm, var_kilo in impactos_n2_kilo.items():
+                costo_base_kg, cod_show, nom_show = consultar_master_gen(
                     df_lista_n2, cod_norm, "2"
                 )
+                costo_sim_kg = costo_base_kg + var_kilo
                 porc_var = (
-                    (inc_batch / costo_base * 100) if costo_base > 0 else 0.0
+                    (var_kilo / costo_base_kg * 100)
+                    if costo_base_kg > 0
+                    else 0.0
                 )
+
                 filas_n2.append({
-                    "Código Receta N2": cod_show,
+                    "Código N2": cod_show,
                     "Nombre Intermedio": nom_show,
-                    "Costo Actual Batch": f"Bs {costo_base:.2f}",
-                    "Costo Simulado Batch": f"Bs {(costo_base + inc_batch):.2f}",
-                    "Variación Batch (Bs)": f"+Bs {inc_batch:.2f}",
+                    "Costo Actual / Kg": f"Bs {costo_base_kg:.2f}",
+                    "Costo Simulado / Kg": f"Bs {costo_sim_kg:.2f}",
+                    "Variación / Kg (Bs)": f"+Bs {var_kilo:.2f}",
                     "Variación (%)": f"+{porc_var:.1f}%",
                 })
 
-            # --- 3. IMPACTO EN RECETAS N3 (Productos Finales) ---
+            # --- 3. RECETAS N3 (Productos Finales) ---
             impactos_n3 = {}
             for _, row in df_recetas_n3.iterrows():
                 vals = [str(v).strip() for v in row.values]
@@ -387,8 +391,8 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                             break
                     inc_producto_final += cant * dif_precio_unitario
 
-                # N1 consumido directo en N3
-                for cod_n1_norm, inc_gramo_n1 in impactos_n1_por_gramo.items():
+                # N1 consumido en N3
+                for cod_n1_norm, var_kilo_n1 in impactos_n1_kilo.items():
                     if cod_n1_norm in row_norms[1:]:
                         idx = row_norms[1:].index(cod_n1_norm) + 1
                         cant_n1 = 0.0
@@ -397,10 +401,10 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                             if num > 0:
                                 cant_n1 = num
                                 break
-                        inc_producto_final += cant_n1 * inc_gramo_n1
+                        inc_producto_final += cant_n1 * var_kilo_n1
 
-                # N2 consumido directo en N3 (Relleno/Intermedio)
-                for cod_n2_norm, inc_gramo_n2 in impactos_n2_por_gramo.items():
+                # N2 consumido en N3
+                for cod_n2_norm, var_kilo_n2 in impactos_n2_kilo.items():
                     if cod_n2_norm in row_norms[1:]:
                         idx = row_norms[1:].index(cod_n2_norm) + 1
                         cant_n2 = 0.0
@@ -409,7 +413,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                             if num > 0:
                                 cant_n2 = num
                                 break
-                        inc_producto_final += cant_n2 * inc_gramo_n2
+                        inc_producto_final += cant_n2 * var_kilo_n2
 
                 if inc_producto_final > 0:
                     impactos_n3[nombre_o_cod_n3] = (
@@ -429,7 +433,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 filas_n3.append({
                     "Código Producto N3": cod_show,
                     "Nombre Producto Final": nom_show,
-                    "Costo Actual (Costo R3)": f"Bs {costo_base:.2f}",
+                    "Costo Actual (R3)": f"Bs {costo_base:.2f}",
                     "Costo Simulado": f"Bs {(costo_base + inc_total):.2f}",
                     "Variación (Bs)": f"+Bs {inc_total:.2f}",
                     "Variación (%)": f"+{porc_var:.1f}%",
@@ -440,7 +444,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
             resumen_l3 = pd.DataFrame(filas_n3)
 
             st.subheader(
-                f"📊 Resultados Ajustados para Insumo: [{codigo_target_raw}] - {articulo_mostrar}"
+                f"📊 Resultados Simulación: [{codigo_target_raw}] - {articulo_mostrar}"
             )
 
             t3, t2, t1 = st.tabs(
