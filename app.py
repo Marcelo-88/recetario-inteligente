@@ -14,10 +14,10 @@ CSS_FRIDOLIN = """
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap');
 
-    /* UNIFICACIÓN TIPOGRÁFICA Y COLOR DE TEXTO EN TODO EL SITIO */
-    html, body, [class*="css"], [class*="st-"], .stMarkdown, p, h1, h2, h3, h4, h5, h6, span, label, div {
+    /* TIPOGRAFÍA GLOBAL FUERTE Y TEXTO GENERAL OBSCURO */
+    html, body, [class*="css"], [class*="st-"], .stMarkdown, p, span, label, div {
         font-family: 'Poppins', sans-serif !important;
-        color: #222222 !important;
+        color: #222222;
     }
 
     /* Fondo General (Crema Soft) */
@@ -25,26 +25,29 @@ CSS_FRIDOLIN = """
         background-color: #FAF8F5;
     }
 
-    /* Banner/Encabezado Principal (Guindo Fridolin) */
+    /* BANNER PRINCIPAL (Restaurado a Tono Guindo + Texto Blanco/Rosado) */
     .header-fridolin {
-        background-color: #8B1D2C;
-        padding: 1.5rem 2rem;
+        background-color: #8B1D2C !important;
+        padding: 1.8rem 2rem;
         border-radius: 12px;
-        color: white;
         margin-bottom: 1.5rem;
-        box-shadow: 0 4px 12px rgba(139, 29, 44, 0.15);
+        box-shadow: 0 4px 12px rgba(139, 29, 44, 0.2);
     }
     .header-fridolin h1 {
         color: #FFFFFF !important;
-        margin: 0;
-        font-weight: 700;
-        font-size: 1.8rem;
+        font-family: 'Poppins', sans-serif !important;
+        margin: 0 !important;
+        font-weight: 700 !important;
+        font-size: 1.8rem !important;
+        line-height: 1.2 !important;
     }
     .header-fridolin p {
         color: #F3E5E8 !important;
-        margin-top: 5px;
-        margin-bottom: 0;
-        font-size: 0.95rem;
+        font-family: 'Poppins', sans-serif !important;
+        margin-top: 6px !important;
+        margin-bottom: 0 !important;
+        font-size: 0.95rem !important;
+        font-weight: 400 !important;
     }
 
     /* Barra Lateral */
@@ -53,14 +56,16 @@ CSS_FRIDOLIN = """
         border-right: 1px solid #EBE5DF;
     }
 
-    /* Títulos dentro de Streamlit (h1, h2, h3) */
+    /* Títulos fuera del banner (Títulos de Secciones) */
     h1, h2, h3 {
+        font-family: 'Poppins', sans-serif !important;
         font-weight: 700 !important;
         color: #8B1D2C !important;
     }
 
     /* Pestañas / Tabs Activas */
     button[data-baseweb="tab"] {
+        font-family: 'Poppins', sans-serif !important;
         font-weight: 600 !important;
         color: #555555 !important;
     }
@@ -78,7 +83,7 @@ CSS_FRIDOLIN = """
 """
 st.markdown(CSS_FRIDOLIN, unsafe_allow_html=True)
 
-# 3. ENCABEZADO CON LA PALETA FRIDOLIN
+# 3. ENCABEZADO CON LA PALETA ORIGINAL Y TEXTO CLARO
 st.markdown(
     """
     <div class="header-fridolin">
