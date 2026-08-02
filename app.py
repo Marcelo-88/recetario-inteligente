@@ -221,82 +221,59 @@ def obtener_precios_y_costo_n3(row_n3):
     return costo, pv1, pv2, pv3
 
 
-# 🔥 NUEVA FUNCIÓN BLINDADA CON MÁQUINA DE ESTADOS 🔥
-def extraer_componentes_receta(fila_receta):
-    vals = [str(v).strip() for v in fila_receta.values[1:]] # Saltamos la Col 0 (Receta Padre)
-    componentes = []
-    
-    estado = "BUSCANDO_NOMBRE"
-    comp_actual = {}
-    
-    for v in vals:
-        v_upper = v.upper()
-        
-        # 1. Ignorar celdas vacías y basura
-        if not v or v_upper in ["", "-", "NAN", "NO SE ENCONTRO", "NADA", "INGREDIENTE", "INSUMO", "CANTIDAD", "UNIDAD", "KG", "LTS"]:
-            continue
-            
-        # 2. Es número?
-        es_numero = False
-        v_num = v.replace(".", "", 1).replace(",", "", 1).replace("-", "", 1)
-        if v_num.isdigit():
-            es_numero = True
-            
-        # 3. Es código ERP? (No tiene espacios, es corto y tiene números)
-        es_codigo_erp = " " not in v_upper and len(v_upper) <= 15 and any(c.isdigit() for c in v_upper)
-        
-        # 4. Es monto financiero?
-        es_moneda = bool(re.match(r"^BS\.?\s*\d+", v_upper)) or "COSTO" in v_upper
-        if es_moneda:
-            continue 
-            
-        # --- MOTOR DE ESTADOS ---
-        if estado == "BUSCANDO_NOMBRE":
-            if not es_numero:
-                comp_actual = {"componente": v, "cantidad": 0.0, "unidad": "Kg/U"}
-                estado = "BUSCANDO_CANTIDAD"
-                
-        elif estado == "BUSCANDO_CANTIDAD":
-            if es_numero:
-                comp_actual["cantidad"] = extraer_num(v)
-                estado = "BUSCANDO_UNIDAD"
-            else:
-                comp_upper = comp_actual.get("componente", "").upper()
-                es_comp_previo_codigo = " " not in comp_upper and len(comp_upper) <= 15 and any(c.isdigit() for c in comp_upper)
-                
-                # Si leímos un código (Ej: 1-86-00003) y ahora leemos texto (Dulce de Leche), corregimos el nombre
-                if es_comp_previo_codigo and not es_codigo_erp:
-                    comp_actual["componente"] = v
-                else:
-                    # El anterior no tenía cantidad, lo cerramos e iniciamos uno nuevo
-                    componentes.append(comp_actual)
-                    comp_actual = {"componente": v, "cantidad": 0.0, "unidad": "Kg/U"}
-                    
-        elif estado == "BUSCANDO_UNIDAD":
-            if es_numero:
-                componentes.append(comp_actual)
-                comp_actual = {}
-                estado = "BUSCANDO_NOMBRE"
-            elif es_codigo_erp:
-                # Nos chocamos con el código del SIGUIENTE componente
-                componentes.append(comp_actual)
-                comp_actual = {"componente": v, "cantidad": 0.0, "unidad": "Kg/U"}
-                estado = "BUSCANDO_CANTIDAD"
-            else:
-                if len(v) <= 15: # Si es corto es unidad
-                    comp_actual["unidad"] = v
-                    componentes.append(comp_actual)
-                    comp_actual = {}
-                    estado = "BUSCANDO_NOMBRE"
-                else: # Si es largo, es el nombre del siguiente
-                    componentes.append(comp_actual)
-                    comp_actual = {"componente": v, "cantidad": 0.0, "unidad": "Kg/U"}
-                    estado = "BUSCANDO_CANTIDAD"
-                    
-    if comp_actual and "componente" in comp_actual:
-        componentes.append(comp_actual)
-        
-    return componentes
+# 🔥 LÓGICA BASADA EN LAS COLUMNAS EXACTAS DEL DRIVE 🔥
+def extraer_componentes_por_columnas(filas_receta):
+    mp_list = []
+    n1_list = []
+    n2_list = []
+
+    for _, row in filas_receta.iterrows():
+        # Materia Prima Directa (Col B=1: Nombre, Col C=2: Código, Col E=4: Cantidad, Col F=5: Unidad)
+        if len(row) > 1 and str(row.iloc[1]).strip() not in ["", "-", "NADA"]:
+            nom_mp = str(row.iloc[1]).strip()
+            cod_mp = limpiar_cod_mostrar(row.iloc[2]) if len(row) > 2 else ""
+            cant_mp = extraer_num(row.iloc[4]) if len(row) > 4 else 0.0
+            unid_mp = str(row.iloc[5]).strip() if len(row) > 5 and str(row.iloc[5]).strip() else "Empaque/Kg"
+
+            if nom_mp and nom_mp.upper() != "MATERIA PRIMA":
+                mp_list.append({
+                    "Código ERP": cod_mp if cod_mp else "-",
+                    "Nombre del Insumo": nom_mp,
+                    "Cantidad": f"{cant_mp:.4f}",
+                    "Unidad": unid_mp
+                })
+
+        # Recetas N1 (Col G=6: Nombre, Col H=7: Código, Col I=8: Cantidad, Col J=9: Unidad)
+        if len(row) > 6 and str(row.iloc[6]).strip() not in ["", "-", "NADA"]:
+            nom_n1 = str(row.iloc[6]).strip()
+            cod_n1 = limpiar_cod_mostrar(row.iloc[7]) if len(row) > 7 else ""
+            cant_n1 = extraer_num(row.iloc[8]) if len(row) > 8 else 0.0
+            unid_n1 = str(row.iloc[9]).strip() if len(row) > 9 and str(row.iloc[9]).strip() else "Kg/U"
+
+            if nom_n1 and nom_n1.upper() != "RECETAS N1":
+                n1_list.append({
+                    "codigo": cod_n1 if cod_n1 else normalizar_cod(nom_n1),
+                    "nombre": nom_n1,
+                    "cantidad": cant_n1,
+                    "unidad": unid_n1
+                })
+
+        # Recetas N2 (Col K=10: Nombre, Col L=11: Código, Col M=12: Cantidad, Col N=13: Unidad)
+        if len(row) > 10 and str(row.iloc[10]).strip() not in ["", "-", "NADA"]:
+            nom_n2 = str(row.iloc[10]).strip()
+            cod_n2 = limpiar_cod_mostrar(row.iloc[11]) if len(row) > 11 else ""
+            cant_n2 = extraer_num(row.iloc[12]) if len(row) > 12 else 0.0
+            unid_n2 = str(row.iloc[13]).strip() if len(row) > 13 and str(row.iloc[13]).strip() else "Kg/U"
+
+            if nom_n2 and nom_n2.upper() != "RECETAS N2":
+                n2_list.append({
+                    "codigo": cod_n2 if cod_n2 else normalizar_cod(nom_n2),
+                    "nombre": nom_n2,
+                    "cantidad": cant_n2,
+                    "unidad": unid_n2
+                })
+
+    return mp_list, n1_list, n2_list
 
 
 # ==========================================
@@ -326,7 +303,6 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
         df_recetas_n3 = cargar_pestaña("Recetas_N3")
         df_recetas_n2 = cargar_pestaña("Recetas_N2")
         df_recetas_n1 = cargar_pestaña("Recetas_N1")
-        df_mermas = cargar_pestaña("Mermas_Costos")
 
         col_nom_n3 = df_lista_n3.columns[0]
         col_cod_n3 = df_lista_n3.columns[1] if len(df_lista_n3.columns) > 1 else col_nom_n3
@@ -383,104 +359,77 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
             # --- ESTRUCTURA MULTINIVEL ---
             st.markdown("##### 🌳 Estructura Multinivel Desglosada")
 
-            match_r3 = df_recetas_n3[
+            # Filtramos todas las filas que pertenecen a este producto en Recetas_N3
+            filas_r3 = df_recetas_n3[
                 df_recetas_n3.iloc[:, 0].apply(limpiar_texto_comparar) == limpiar_texto_comparar(nombre_p)
             ]
-            if match_r3.empty and len(codigo_p) > 2:
-                match_r3 = df_recetas_n3[
+            if filas_r3.empty and len(codigo_p) > 2:
+                filas_r3 = df_recetas_n3[
                     df_recetas_n3.iloc[:, 0].apply(normalizar_cod) == normalizar_cod(codigo_p)
                 ]
 
-            if not match_r3.empty:
-                comp_n3 = extraer_componentes_receta(match_r3.iloc[0])
-
-                materia_prima_list = []
-                recetas_n1_list = []
-                recetas_n2_list = []
-
-                for comp in comp_n3:
-                    nombre_c = comp["componente"]
-                    cant_c = comp["cantidad"]
-                    unid_c = comp["unidad"]
-
-                    norm_c = normalizar_cod(nombre_c)
-                    fuzzy_c = limpiar_texto_comparar(nombre_c)
-
-                    match_sub_n2 = df_recetas_n2[
-                        (df_recetas_n2.iloc[:, 0].apply(normalizar_cod) == norm_c)
-                        | (df_recetas_n2.iloc[:, 0].apply(limpiar_texto_comparar) == fuzzy_c)
-                    ]
-
-                    match_sub_n1 = df_recetas_n1[
-                        (df_recetas_n1.iloc[:, 0].apply(normalizar_cod) == norm_c)
-                        | (df_recetas_n1.iloc[:, 0].apply(limpiar_texto_comparar) == fuzzy_c)
-                    ]
-
-                    if not match_sub_n2.empty:
-                        recetas_n2_list.append((nombre_c, cant_c, unid_c, match_sub_n2.iloc[0]))
-                    elif not match_sub_n1.empty:
-                        recetas_n1_list.append((nombre_c, cant_c, unid_c, match_sub_n1.iloc[0]))
-                    else:
-                        match_mp = df_mermas[
-                            (df_mermas.iloc[:, 0].apply(limpiar_texto_comparar) == fuzzy_c)
-                            | (df_mermas.iloc[:, 1].apply(normalizar_cod) == norm_c)
-                        ]
-                        cod_mp = limpiar_cod_mostrar(match_mp.iloc[0, 1]) if not match_mp.empty else norm_c
-                        materia_prima_list.append((cod_mp, nombre_c, f"{cant_c:.4f}", unid_c))
+            if not filas_r3.empty:
+                materia_prima_list, recetas_n1_list, recetas_n2_list = extraer_componentes_por_columnas(filas_r3)
 
                 with st.expander(f"🔹 **Materia Prima Directa** ({len(materia_prima_list)} insumos)", expanded=True):
                     if materia_prima_list:
-                        df_mp = pd.DataFrame(materia_prima_list, columns=["Código ERP", "Nombre del Insumo", "Cantidad", "Unidad"])
+                        df_mp = pd.DataFrame(materia_prima_list)
                         st.dataframe(df_mp, use_container_width=True, hide_index=True)
                     else:
                         st.write("No contiene Materia Prima directa.")
 
                 if recetas_n1_list:
                     st.markdown("##### 🔴 Recetas N1 (Sub-Recetas Base)")
-                    for nom_n1, cant_n1, unid_n1, fila_n1 in recetas_n1_list:
-                        cod_n1 = normalizar_cod(nom_n1)
+                    for item_n1 in recetas_n1_list:
+                        cod_n1 = item_n1["codigo"]
+                        nom_n1 = item_n1["nombre"]
+                        cant_n1 = item_n1["cantidad"]
+                        unid_n1 = item_n1["unidad"]
+
                         with st.expander(f"🔴 **[{cod_n1}] {nom_n1}** — {cant_n1:.4f} {unid_n1}"):
-                            st.caption("Composición interna de esta Sub-Receta N1:")
-                            sub_comps = extraer_componentes_receta(fila_n1)
-                            if sub_comps:
-                                df_sub = pd.DataFrame(sub_comps)
-                                df_sub.columns = ["Componente / Insumo", "Cantidad", "Unidad"]
-                                df_sub["Cantidad"] = df_sub["Cantidad"].apply(lambda x: f"{float(x):.4f}")
-                                st.dataframe(df_sub, use_container_width=True, hide_index=True)
+                            # Buscamos en Recetas_N1
+                            filas_sub_n1 = df_recetas_n1[
+                                (df_recetas_n1.iloc[:, 0].apply(normalizar_cod) == normalizar_cod(nom_n1))
+                                | (df_recetas_n1.iloc[:, 0].apply(limpiar_texto_comparar) == limpiar_texto_comparar(nom_n1))
+                            ]
+                            if not filas_sub_n1.empty:
+                                mp_n1, _, _ = extraer_componentes_por_columnas(filas_sub_n1)
+                                if mp_n1:
+                                    df_sub_n1 = pd.DataFrame(mp_n1)
+                                    st.dataframe(df_sub_n1, use_container_width=True, hide_index=True)
+                                else:
+                                    st.write("Sin componentes registrados.")
                             else:
-                                st.write("Sin detalle registrado.")
+                                st.write("Detalle no encontrado en la hoja Recetas_N1.")
 
                 if recetas_n2_list:
                     st.markdown("##### 🟠 Recetas N2 (Intermedios / Rellenos)")
-                    for nom_n2, cant_n2, unid_n2, fila_n2 in recetas_n2_list:
-                        cod_n2 = normalizar_cod(nom_n2)
+                    for item_n2 in recetas_n2_list:
+                        cod_n2 = item_n2["codigo"]
+                        nom_n2 = item_n2["nombre"]
+                        cant_n2 = item_n2["cantidad"]
+                        unid_n2 = item_n2["unidad"]
+
                         with st.expander(f"🟠 **[{cod_n2}] {nom_n2}** — {cant_n2:.4f} {unid_n2}"):
-                            st.caption("Composición interna de esta Receta N2:")
-                            sub_comps_n2 = extraer_componentes_receta(fila_n2)
+                            # Buscamos en Recetas_N2
+                            filas_sub_n2 = df_recetas_n2[
+                                (df_recetas_n2.iloc[:, 0].apply(normalizar_cod) == normalizar_cod(nom_n2))
+                                | (df_recetas_n2.iloc[:, 0].apply(limpiar_texto_comparar) == limpiar_texto_comparar(nom_n2))
+                            ]
+                            if not filas_sub_n2.empty:
+                                mp_sub2, inner_n1, _ = extraer_componentes_por_columnas(filas_sub_n2)
 
-                            if sub_comps_n2:
-                                for sub_c in sub_comps_n2:
-                                    s_nom = sub_c["componente"]
-                                    s_cant = sub_c["cantidad"]
-                                    s_unid = sub_c["unidad"]
-                                    s_norm = normalizar_cod(s_nom)
+                                if mp_sub2:
+                                    st.caption("Materia Prima / Insumos del Relleno:")
+                                    df_sub_n2 = pd.DataFrame(mp_sub2)
+                                    st.dataframe(df_sub_n2, use_container_width=True, hide_index=True)
 
-                                    match_inner_n1 = df_recetas_n1[
-                                        (df_recetas_n1.iloc[:, 0].apply(normalizar_cod) == s_norm)
-                                        | (df_recetas_n1.iloc[:, 0].apply(limpiar_texto_comparar) == limpiar_texto_comparar(s_nom))
-                                    ]
-
-                                    if not match_inner_n1.empty:
-                                        with st.expander(f"🔴 **[N1 interna] [{s_norm}] {s_nom}** — {float(s_cant):.4f} {s_unid}"):
-                                            inner_comps = extraer_componentes_receta(match_inner_n1.iloc[0])
-                                            df_inner = pd.DataFrame(inner_comps)
-                                            df_inner.columns = ["Componente / Insumo", "Cantidad", "Unidad"]
-                                            df_inner["Cantidad"] = df_inner["Cantidad"].apply(lambda x: f"{float(x):.4f}")
-                                            st.dataframe(df_inner, use_container_width=True, hide_index=True)
-                                    else:
-                                        st.markdown(f"• **[{s_norm}] {s_nom}** — {float(s_cant):.4f} {s_unid}")
+                                if inner_n1:
+                                    st.caption("Sub-Recetas N1 internas:")
+                                    for item_inner in inner_n1:
+                                        st.markdown(f"• **[{item_inner['codigo']}] {item_inner['nombre']}** — {item_inner['cantidad']:.4f} {item_inner['unidad']}")
                             else:
-                                st.write("Sin detalle registrado.")
+                                st.write("Detalle no encontrado en la hoja Recetas_N2.")
 
             else:
                 st.warning("No se encontró el desglose de esta receta en Recetas_N3.")
