@@ -88,12 +88,12 @@ ID_HOJA = "1Y8Dzxl_1jVCUrceAQVfSc94RNugo2cgRsrHJwXLwmU4"
 def cargar_pestaña(nombre_pestaña):
     url = f"https://docs.google.com/spreadsheets/d/{ID_HOJA}/gviz/tq?tqx=out:csv&sheet={nombre_pestaña}"
     df = pd.read_csv(url, dtype=str)
-    # Limpieza estándar de encabezados
+    # Limpieza estándar de encabezados de columna
     df.columns = [re.sub(r"\s+", " ", str(c)).strip() for c in df.columns]
     return df.fillna("")
 
 def extraer_num(val):
-    if pd.isna(val) or str(val).strip() in ["", "-", "nan", "NO SE ENCONTRO", "NADA"]:
+    if pd.isna(val) or str(val).strip() in ["", "-", "nan", "NO SE ENCONTRO", "NADA", "No Aplica"]:
         return 0.0
     try:
         s = str(val).strip()
@@ -106,6 +106,17 @@ def normalizar_texto(val):
     if pd.isna(val):
         return ""
     return str(val).strip()
+
+def buscar_valor_columna(df_row, lista_palabras_clave):
+    """Busca dinámicamente un valor en la fila según los nombres de columna."""
+    for col in df_row.index:
+        col_upper = str(col).strip().upper()
+        if any(clave.upper() in col_upper for clave in lista_palabras_clave):
+            val = df_row[col]
+            num = extraer_num(val)
+            if num > 0 or str(val).strip() in ["0", "0.0", "0,0"]:
+                return num
+    return 0.0
 
 # ==========================================
 # 4. MENÚ LATERAL Y NAVEGACIÓN
@@ -132,7 +143,7 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
         df_recetas_n3 = cargar_pestaña("Recetas_N3")
         df_lista_n3 = cargar_pestaña("Lista_N3")
 
-        # Mapeo flexible de columnas para Lista_N3
+        # Mapeo flexible de la primera y segunda columna de Lista_N3 (Nombre y Código ERP)
         col_nom_l3 = df_lista_n3.columns[0]
         col_cod_l3 = df_lista_n3.columns[1] if len(df_lista_n3.columns) > 1 else col_nom_l3
 
@@ -148,16 +159,16 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
             nombre_producto = normalizar_texto(fila_master[col_nom_l3])
             codigo_producto = normalizar_texto(fila_master[col_cod_l3])
 
-            # Lectura de Costo y Precios
-            costo_r3 = extraer_num(fila_master.iloc[2]) if len(fila_master) > 2 else 0.0
-            pv1 = extraer_num(fila_master.iloc[3]) if len(fila_master) > 3 else 0.0
-            pv2 = extraer_num(fila_master.iloc[4]) if len(fila_master) > 4 else 0.0
-            pv3 = extraer_num(fila_master.iloc[5]) if len(fila_master) > 5 else 0.0
+            # --- LECTURA DINÁMICA DE FINANZAS ---
+            costo_r3 = buscar_valor_columna(fila_master, ["Costo Total N3", "Costo R3", "Costo Total", "Costo"])
+            pv1 = buscar_valor_columna(fila_master, ["Precio Venta 1", "PV1", "Precio 1"])
+            pv2 = buscar_valor_columna(fila_master, ["Precio Venta 2", "PV2", "Precio 2"])
+            pv3 = buscar_valor_columna(fila_master, ["Precio Venta 3", "PV3", "Precio 3"])
 
             st.divider()
             st.markdown(f"### 🎂 {nombre_producto} <small style='color:#777;'>(Código ERP: {codigo_producto})</small>", unsafe_allow_html=True)
 
-            # --- MÉTRICAS DE FINANCIERAS ---
+            # --- MÉTRICAS FINANCIERAS ---
             st.markdown("##### 💵 Análisis de Costo & Márgenes")
             m1, m2, m3, m4 = st.columns(4)
 
@@ -166,50 +177,44 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
 
             with m2:
                 if pv1 > 0:
-                    margen1 = ((pv1 - costo_r3) / pv1 * 100)
+                    margen1 = ((pv1 - costo_r3) / pv1 * 100) if pv1 > 0 else 0
                     st.metric("Precio Venta 1", f"Bs {pv1:.2f}", delta=f"{margen1:.1f}% Margen")
                 else:
-                    st.metric("Precio Venta 1", "N/A")
+                    st.metric("Precio Venta 1", "No Aplica")
 
             with m3:
                 if pv2 > 0:
-                    margen2 = ((pv2 - costo_r3) / pv2 * 100)
+                    margen2 = ((pv2 - costo_r3) / pv2 * 100) if pv2 > 0 else 0
                     st.metric("Precio Venta 2", f"Bs {pv2:.2f}", delta=f"{margen2:.1f}% Margen")
                 else:
                     st.metric("Precio Venta 2", "No Aplica")
 
             with m4:
                 if pv3 > 0:
-                    margen3 = ((pv3 - costo_r3) / pv3 * 100)
+                    margen3 = ((pv3 - costo_r3) / pv3 * 100) if pv3 > 0 else 0
                     st.metric("Precio Venta 3", f"Bs {pv3:.2f}", delta=f"{margen3:.1f}% Margen")
                 else:
                     st.metric("Precio Venta 3", "No Aplica")
 
             st.divider()
 
-            # --- DESGLOSE ESTRUCTURAL DE LA HOJA RECETAS_N3 ---
+            # --- DESGLOSE ESTRUCTURAL MULTINIVEL ---
             st.markdown("##### 🌳 Estructura Multinivel Desglosada")
 
-            # Filtrar todas las filas correspondientes a la Receta N3 seleccionada
             col_receta_padre = df_recetas_n3.columns[0]
             sub_df = df_recetas_n3[df_recetas_n3[col_receta_padre].astype(str).str.strip().str.upper() == nombre_producto.upper()]
 
             if sub_df.empty:
-                # Búsqueda secundaria por código si el nombre no coincide exactamente
                 sub_df = df_recetas_n3[df_recetas_n3.iloc[:, 2].astype(str).str.strip().str.upper() == codigo_producto.upper()]
 
             if not sub_df.empty:
-                # 1. PROCESAR MATERIA PRIMA (Cols B a E aprox en tu Google Sheet)
-                # Seleccionar por índice o nombre de columna según la captura
-                cols = list(sub_df.columns)
-                
-                # Materia Prima Directa
+                # 1. MATERIA PRIMA DIRECTA (Cols B a E)
                 mp_rows = []
                 for _, row in sub_df.iterrows():
-                    nom_mp = normalizar_texto(row.iloc[1]) # Col B: Materia Prima
-                    cod_mp = normalizar_texto(row.iloc[2]) # Col C: Código ERP
-                    cat_mp = normalizar_texto(row.iloc[3]) # Col D: Categoría
-                    cant_mp = extraer_num(row.iloc[4])     # Col E: Cantidad MP
+                    nom_mp = normalizar_texto(row.iloc[1])
+                    cod_mp = normalizar_texto(row.iloc[2])
+                    cat_mp = normalizar_texto(row.iloc[3])
+                    cant_mp = extraer_num(row.iloc[4])
                     unid_mp = normalizar_texto(row.iloc[5]) if len(row) > 5 else "Kg/U"
 
                     if nom_mp and nom_mp not in ["NO SE ENCONTRO", "NADA", "-"]:
@@ -223,14 +228,14 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
 
                 df_mp_final = pd.DataFrame(mp_rows).drop_duplicates()
 
-                # 2. PROCESAR RECETAS N1
+                # 2. RECETAS N1 (Cols G a J)
                 n1_rows = []
                 for _, row in sub_df.iterrows():
                     if len(row) > 9:
-                        nom_n1 = normalizar_texto(row.iloc[6])  # Col G: Recetas N1
-                        cod_n1 = normalizar_texto(row.iloc[7])  # Col H: Código N1
-                        cant_n1 = extraer_num(row.iloc[8])     # Col I: Cantidad N1
-                        unid_n1 = normalizar_texto(row.iloc[9]) # Col J: Unidad N1
+                        nom_n1 = normalizar_texto(row.iloc[6])
+                        cod_n1 = normalizar_texto(row.iloc[7])
+                        cant_n1 = extraer_num(row.iloc[8])
+                        unid_n1 = normalizar_texto(row.iloc[9])
 
                         if nom_n1 and cant_n1 > 0 and nom_n1 not in ["NO SE ENCONTRO", "NADA", "-"]:
                             n1_rows.append({
@@ -242,14 +247,14 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
 
                 df_n1_final = pd.DataFrame(n1_rows).drop_duplicates()
 
-                # 3. PROCESAR RECETAS N2
+                # 3. RECETAS N2 (Cols K a N)
                 n2_rows = []
                 for _, row in sub_df.iterrows():
                     if len(row) > 13:
-                        nom_n2 = normalizar_texto(row.iloc[10]) # Col K: Recetas N2
-                        cod_n2 = normalizar_texto(row.iloc[11]) # Col L: Código N2
-                        cant_n2 = extraer_num(row.iloc[12])     # Col M: Cantidad N2
-                        unid_n2 = normalizar_texto(row.iloc[13]) # Col N: Unidad N2
+                        nom_n2 = normalizar_texto(row.iloc[10])
+                        cod_n2 = normalizar_texto(row.iloc[11])
+                        cant_n2 = extraer_num(row.iloc[12])
+                        unid_n2 = normalizar_texto(row.iloc[13])
 
                         if nom_n2 and cant_n2 > 0 and nom_n2 not in ["NO SE ENCONTRO", "NADA", "-"]:
                             n2_rows.append({
@@ -261,7 +266,7 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
 
                 df_n2_final = pd.DataFrame(n2_rows).drop_duplicates()
 
-                # --- MOSTRAR TABLAS SEPARADAS EN DESPLEGABLES ---
+                # MOSTRAR EN ACORDEONES
                 with st.expander(f"🔹 **Materia Prima Directa** ({len(df_mp_final)} insumos)", expanded=True):
                     if not df_mp_final.empty:
                         st.dataframe(df_mp_final, use_container_width=True)
