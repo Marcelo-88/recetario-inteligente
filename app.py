@@ -9,7 +9,7 @@ st.set_page_config(
 )
 
 st.title("🍳 Recetario Inteligente & Centro de Control")
-st.caption("Simulación Financiera Multinivel Exacta por Código ERP")
+st.caption("Simulación Financiera Multicolumna Multinivel Exacta por Código ERP")
 st.divider()
 
 ID_HOJA = "1Y8Dzxl_1jVCUrceAQVfSc94RNugo2cgRsrHJwXLwmU4"
@@ -92,9 +92,9 @@ if modo_app == "📋 Explorador de Tablas":
         st.error(f"Error al cargar {pestaña_activa}: {e}")
 
 elif modo_app == "💥 Simulación Financiera Multinivel":
-    st.header("💥 Simulación de Impacto Jerárquica (N1 ➔ N2 ➔ N3)")
+    st.header("💥 Simulación Multicolumna (Materia Prima + Sub-Recetas N1/N2)")
     st.info(
-        "Flujo correcto: Insumo detectado en Recetas N1 ➔ Arrastre de costos a N2 ➔ Impacto final acumulado en N3"
+        "Escanéo integral de columnas: detecta insumos directamente o integrados como sub-receta en N1, N2 y N3."
     )
 
     try:
@@ -170,20 +170,6 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
 
             st.divider()
 
-            # Normalizar DataFrames de Recetas
-            def preparar_receta(df):
-                df_c = df.copy()
-                df_c.columns = [c.strip() for c in df_c.columns]
-                cols = list(df_c.columns)
-                df_c["PADRE_COD"] = df_c[cols[0]].apply(limpiar_codigo)
-                df_c["COMPONENT_COD"] = df_c[cols[1]].apply(limpiar_codigo)
-                df_c["CANTIDAD"] = df_c[cols[2]].apply(extraer_num) if len(cols) > 2 else 0.0
-                return df_c
-
-            r1 = preparar_receta(df_recetas_n1)
-            r2 = preparar_receta(df_recetas_n2)
-            r3 = preparar_receta(df_recetas_n3)
-
             def preparar_lista(df):
                 df_c = df.copy()
                 df_c.columns = [c.strip() for c in df_c.columns]
@@ -198,120 +184,137 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
             l2 = preparar_lista(df_lista_n2)
             l3 = preparar_lista(df_lista_n3)
 
-            # --- PASO 1: EVALUAR RECETAS_N1 ---
-            impactos_n1 = {}  # {cod_receta_n1: incremento_bs_batch}
+            # --- EVALUAR RECETAS N1 ---
+            impactos_n1 = {}
             filas_n1 = []
 
-            for cod_rec, group in r1.groupby("PADRE_COD"):
-                if not cod_rec:
+            for index, row in df_recetas_n1.iterrows():
+                row_vals = [limpiar_codigo(v) for v in row.values]
+                if not row_vals[0]:
                     continue
 
-                peso_total_batch = group["CANTIDAD"].sum()
-                match = group[group["COMPONENT_COD"] == codigo_target]
+                receta_padre = row_vals[0]
+                # Buscar en todas las celdas de la fila
+                if codigo_target in row_vals[1:]:
+                    cant_usada = 0.0
+                    for v in row.values:
+                        num = extraer_num(v)
+                        if num > 0 and num < 1000:
+                            cant_usada = num
+                            break
 
-                if not match.empty:
-                    cant_insumo = match["CANTIDAD"].sum()
-                    inc_total = cant_insumo * dif_precio
-                    impactos_n1[cod_rec] = inc_total
+                    inc_total = (cant_usada if cant_usada > 0 else 1.0) * dif_precio
+                    impactos_n1[receta_padre] = (
+                        impactos_n1.get(receta_padre, 0.0) + inc_total
+                    )
 
-                    pct_peso = (cant_insumo / peso_total_batch * 100) if peso_total_batch > 0 else 0.0
+            for cod_rec, inc_total in impactos_n1.items():
+                master = l1[l1["COD_KEY"] == cod_rec]
+                costo_base = master.iloc[0]["COSTO_VAL"] if not master.empty else 0.0
+                nom_rec = master.iloc[0]["NOM_KEY"] if not master.empty else cod_rec
+                porc_var = (inc_total / costo_base * 100) if costo_base > 0 else 0.0
 
-                    master = l1[l1["COD_KEY"] == cod_rec]
-                    costo_base = master.iloc[0]["COSTO_VAL"] if not master.empty else 0.0
-                    nom_rec = master.iloc[0]["NOM_KEY"] if not master.empty else cod_rec
+                filas_n1.append({
+                    "Código Receta N1": cod_rec,
+                    "Nombre Sub-Receta": nom_rec,
+                    "Costo Actual Batch": f"Bs {costo_base:.2f}",
+                    "Costo Simulado Batch": f"Bs {(costo_base + inc_total):.2f}",
+                    "Variación (Bs)": f"+Bs {inc_total:.2f}",
+                    "Variación (%)": f"+{porc_var:.1f}%",
+                })
 
-                    porc_var = (inc_total / costo_base * 100) if costo_base > 0 else 0.0
-
-                    filas_n1.append({
-                        "Código Receta N1": cod_rec,
-                        "Nombre Sub-Receta": nom_rec,
-                        "Cant. Insumo Usada": f"{cant_insumo:.3f}",
-                        "% Peso en Receta": f"{pct_peso:.1f}%",
-                        "Costo Actual Batch": f"Bs {costo_base:.2f}",
-                        "Costo Simulado Batch": f"Bs {(costo_base + inc_total):.2f}",
-                        "Variación (Bs)": f"+Bs {inc_total:.2f}",
-                        "Variación (%)": f"+{porc_var:.1f}%"
-                    })
-
-            # --- PASO 2: EVALUAR RECETAS_N2 (Lleva Insumo directo O N1 Afectados) ---
+            # --- EVALUAR RECETAS N2 ---
             impactos_n2 = {}
             filas_n2 = []
 
-            for cod_rec, group in r2.groupby("PADRE_COD"):
-                if not cod_rec:
+            for index, row in df_recetas_n2.iterrows():
+                row_vals = [limpiar_codigo(v) for v in row.values]
+                if not row_vals[0]:
                     continue
 
-                peso_total_batch = group["CANTIDAD"].sum()
-                inc_total = 0.0
-                cant_insumo_directo = 0.0
+                receta_padre = row_vals[0]
+                inc_fila = 0.0
 
-                for _, row in group.iterrows():
-                    comp_cod = row["COMPONENT_COD"]
-                    cant = row["CANTIDAD"]
+                if codigo_target in row_vals[1:]:
+                    inc_fila += dif_precio
 
-                    if comp_cod == codigo_target:
-                        inc_total += cant * dif_precio
-                        cant_insumo_directo += cant
-                    elif comp_cod in impactos_n1:
-                        # Si usa una sub-receta N1 afectada, sumamos el proporcional del incremento
-                        inc_total += cant * impactos_n1[comp_cod]
+                for cod_n1, inc_n1 in impactos_n1.items():
+                    if cod_n1 in row_vals[1:]:
+                        inc_fila += inc_n1
 
-                if inc_total > 0:
-                    impactos_n2[cod_rec] = inc_total
+                if inc_fila > 0:
+                    impactos_n2[receta_padre] = (
+                        impactos_n2.get(receta_padre, 0.0) + inc_fila
+                    )
 
-                    pct_peso = (cant_insumo_directo / peso_total_batch * 100) if (peso_total_batch > 0 and cant_insumo_directo > 0) else 0.0
+            for cod_rec, inc_total in impactos_n2.items():
+                master = l2[l2["COD_KEY"] == cod_rec]
+                costo_base = master.iloc[0]["COSTO_VAL"] if not master.empty else 0.0
+                nom_rec = master.iloc[0]["NOM_KEY"] if not master.empty else cod_rec
+                porc_var = (inc_total / costo_base * 100) if costo_base > 0 else 0.0
 
-                    master = l2[l2["COD_KEY"] == cod_rec]
-                    costo_base = master.iloc[0]["COSTO_VAL"] if not master.empty else 0.0
-                    nom_rec = master.iloc[0]["NOM_KEY"] if not master.empty else cod_rec
+                filas_n2.append({
+                    "Código Receta N2": cod_rec,
+                    "Nombre Intermedio": nom_rec,
+                    "Costo Actual Batch": f"Bs {costo_base:.2f}",
+                    "Costo Simulado Batch": f"Bs {(costo_base + inc_total):.2f}",
+                    "Variación (Bs)": f"+Bs {inc_total:.2f}",
+                    "Variación (%)": f"+{porc_var:.1f}%",
+                })
 
-                    porc_var = (inc_total / costo_base * 100) if costo_base > 0 else 0.0
-
-                    filas_n2.append({
-                        "Código Receta N2": cod_rec,
-                        "Nombre Intermedio": nom_rec,
-                        "Costo Actual Batch": f"Bs {costo_base:.2f}",
-                        "Costo Simulado Batch": f"Bs {(costo_base + inc_total):.2f}",
-                        "Variación (Bs)": f"+Bs {inc_total:.2f}",
-                        "Variación (%)": f"+{porc_var:.1f}%"
-                    })
-
-            # --- PASO 3: EVALUAR RECETAS_N3 (Lleva Insumo directo, N1 O N2 Afectados) ---
+            # --- EVALUAR RECETAS N3 ---
+            impactos_n3 = {}
             filas_n3 = []
 
-            for cod_rec, group in r3.groupby("PADRE_COD"):
-                if not cod_rec:
+            for index, row in df_recetas_n3.iterrows():
+                row_vals = [str(v).strip() for v in row.values]
+                row_codes = [limpiar_codigo(v) for v in row.values]
+
+                # Nombre/Código del Producto N3 (Columna A)
+                receta_padre_nombre = row_vals[0]
+                if not receta_padre_nombre:
                     continue
 
-                peso_total_batch = group["CANTIDAD"].sum()
-                inc_total = 0.0
+                inc_fila = 0.0
 
-                for _, row in group.iterrows():
-                    comp_cod = row["COMPONENT_COD"]
-                    cant = row["CANTIDAD"]
+                # Check 1: ¿Usa la Materia Prima directamente?
+                if codigo_target in row_codes:
+                    inc_fila += dif_precio
 
-                    if comp_cod == codigo_target:
-                        inc_total += cant * dif_precio
-                    elif comp_cod in impactos_n1:
-                        inc_total += cant * impactos_n1[comp_cod]
-                    elif comp_cod in impactos_n2:
-                        inc_total += cant * impactos_n2[comp_cod]
+                # Check 2: ¿Usa alguna Sub-Receta N1 afectada?
+                for cod_n1, inc_n1 in impactos_n1.items():
+                    if cod_n1 in row_codes:
+                        inc_fila += inc_n1
 
-                if inc_total > 0:
-                    master = l3[l3["COD_KEY"] == cod_rec]
-                    costo_base = master.iloc[0]["COSTO_VAL"] if not master.empty else 0.0
-                    nom_rec = master.iloc[0]["NOM_KEY"] if not master.empty else cod_rec
+                # Check 3: ¿Usa alguna Sub-Receta N2 afectada?
+                for cod_n2, inc_n2 in impactos_n2.items():
+                    if cod_n2 in row_codes:
+                        inc_fila += inc_n2
 
-                    porc_var = (inc_total / costo_base * 100) if costo_base > 0 else 0.0
+                if inc_fila > 0:
+                    impactos_n3[receta_padre_nombre] = (
+                        impactos_n3.get(receta_padre_nombre, 0.0) + inc_fila
+                    )
 
-                    filas_n3.append({
-                        "Código Producto N3": cod_rec,
-                        "Nombre Producto Final": nom_rec,
-                        "Costo Actual": f"Bs {costo_base:.2f}",
-                        "Costo Simulado": f"Bs {(costo_base + inc_total):.2f}",
-                        "Variación (Bs)": f"+Bs {inc_total:.2f}",
-                        "Variación (%)": f"+{porc_var:.1f}%"
-                    })
+            for nom_rec, inc_total in impactos_n3.items():
+                # Buscar en Lista_N3 por coincidencia de nombre o código
+                master = l3[
+                    (l3["NOM_KEY"].str.strip().str.upper() == nom_rec.upper())
+                    | (l3["COD_KEY"] == limpiar_codigo(nom_rec))
+                ]
+
+                costo_base = master.iloc[0]["COSTO_VAL"] if not master.empty else 0.0
+                cod_show = master.iloc[0]["COD_KEY"] if not master.empty else "-"
+                porc_var = (inc_total / costo_base * 100) if costo_base > 0 else 0.0
+
+                filas_n3.append({
+                    "Código Producto N3": cod_show,
+                    "Nombre Producto Final": nom_rec,
+                    "Costo Actual": f"Bs {costo_base:.2f}",
+                    "Costo Simulado": f"Bs {(costo_base + inc_total):.2f}",
+                    "Variación (Bs)": f"+Bs {inc_total:.2f}",
+                    "Variación (%)": f"+{porc_var:.1f}%",
+                })
 
             resumen_l1 = pd.DataFrame(filas_n1)
             resumen_l2 = pd.DataFrame(filas_n2)
