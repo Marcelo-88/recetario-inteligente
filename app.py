@@ -12,37 +12,14 @@ st.set_page_config(
 )
 
 # ==========================================
-# 2. ESTILOS Y COLORES FRIDOLIN
+# 2. ESTILOS FRIDOLIN (CSS LIMPIO SIN SOLAPAMIENTOS)
 # ==========================================
 CSS_FRIDOLIN = """
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
 
-    /* Tipografía General */
     html, body, [data-testid="stAppViewContainer"] {
         font-family: 'Poppins', sans-serif !important;
-    }
-
-    .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
-    .stApp p, .stApp span, .stApp label, .stApp input, .stApp button,
-    [data-testid="stMarkdownContainer"] p {
-        font-family: 'Poppins', sans-serif !important;
-    }
-
-    /* Bajadas y Captions */
-    .stApp [data-testid="stCaptionContainer"],
-    .stApp small,
-    .stApp .stCaption {
-        font-family: 'Poppins', sans-serif !important;
-        font-size: 0.88rem !important;
-        letter-spacing: normal !important;
-        text-transform: none !important;
-        color: #666666 !important;
-    }
-
-    /* Protección de Iconos de Streamlit */
-    [class*="material-"], [data-testid="stIcon"], i {
-        font-family: 'Material Symbols Rounded', 'Material Icons', sans-serif !important;
     }
 
     /* Fondo Soft */
@@ -53,10 +30,10 @@ CSS_FRIDOLIN = """
     /* Banner Principal */
     .header-fridolin {
         background-color: #8B1D2C !important;
-        padding: 1.8rem 2rem !important;
+        padding: 1.5rem 2rem !important;
         border-radius: 12px !important;
         margin-bottom: 1.5rem !important;
-        box-shadow: 0 4px 12px rgba(139, 29, 44, 0.2) !important;
+        box-shadow: 0 4px 12px rgba(139, 29, 44, 0.15) !important;
     }
     
     .header-fridolin h1 {
@@ -65,16 +42,14 @@ CSS_FRIDOLIN = """
         margin: 0 !important;
         font-weight: 700 !important;
         font-size: 1.8rem !important;
-        line-height: 1.2 !important;
     }
 
     .header-fridolin p {
         color: #F3E5E8 !important;
         font-family: 'Poppins', sans-serif !important;
-        margin-top: 6px !important;
+        margin-top: 4px !important;
         margin-bottom: 0 !important;
         font-size: 0.95rem !important;
-        font-weight: 400 !important;
     }
 
     /* Sidebar */
@@ -84,29 +59,22 @@ CSS_FRIDOLIN = """
     }
 
     /* Títulos */
-    .main h1, .main h2, .main h3 {
+    .main h1, .main h2, .main h3, .main h4 {
         font-family: 'Poppins', sans-serif !important;
         font-weight: 700 !important;
         color: #8B1D2C !important;
-    }
-
-    /* Tabs */
-    button[data-baseweb="tab"] {
-        font-family: 'Poppins', sans-serif !important;
-        font-weight: 600 !important;
-        color: #555555 !important;
-    }
-    
-    button[aria-selected="true"] {
-        color: #8B1D2C !important;
-        border-bottom-color: #8B1D2C !important;
     }
 
     /* Métricas */
     [data-testid="stMetricValue"] {
         color: #8B1D2C !important;
         font-weight: 700 !important;
+    }
+
+    /* Estilo de Expander sin bugs */
+    .st-emotion-cache-p5msec, .streamlit-expanderHeader {
         font-family: 'Poppins', sans-serif !important;
+        font-weight: 600 !important;
     }
 </style>
 """
@@ -215,7 +183,6 @@ def obtener_rendimiento_total_batch(row_values):
     return total if total > 0 else 1.0
 
 
-# Helper para buscar columnas de Precios Venta en Lista_N3
 def obtener_precios_y_costo_n3(row_n3):
     costo = 0.0
     pv1, pv2, pv3 = 0.0, 0.0, 0.0
@@ -233,7 +200,6 @@ def obtener_precios_y_costo_n3(row_n3):
         elif ("PRECIO 3" in col_u or "PV3" in col_u or col_u == "PRECIO DE VENTA 3" or "P. VENTA 3" in col_u) and pv3 == 0.0:
             pv3 = val_num
 
-    # Fallback si no identificó columnas específicas
     if pv1 == 0.0 and len(row_n3) > 3:
         for val in row_n3.values[2:]:
             n = extraer_num(val)
@@ -247,23 +213,43 @@ def obtener_precios_y_costo_n3(row_n3):
     return costo, pv1, pv2, pv3
 
 
-# Extrae los ingredientes/componentes de una fila de receta
+# --- EXTRACCIÓN MEJORADA DE INGREDIENTES ---
 def extraer_componentes_receta(fila_receta):
+    """
+    Extrae componentes filtrando encabezados y distinguiendo texto (nombres) de números (cantidades).
+    """
     vals = [str(v).strip() for v in fila_receta.values]
     componentes = []
     if len(vals) <= 1:
         return componentes
 
-    # Las columnas pares/impares suelen intercalar Componente y Cantidad
     i = 1
     while i < len(vals):
-        nombre_comp = vals[i]
-        if nombre_comp and nombre_comp.upper() not in ["", "-", "NAN"]:
-            cant = 0.0
-            if i + 1 < len(vals):
-                cant = extraer_num(vals[i + 1])
-            componentes.append({"componente": nombre_comp, "cantidad": cant})
-            i += 2
+        val_curr = vals[i]
+
+        # Ignorar vacíos, guiones o costos erróneos
+        if val_curr and val_curr.upper() not in ["", "-", "NAN", "NO SE ENCONTRO"]:
+            # Verificar si no es un número aislado (como un costo)
+            if not re.match(r"^BS\.?\s*\d+", val_curr, re.IGNORECASE) and not val_curr.replace(".", "", 1).replace(",", "", 1).isdigit():
+                nombre_comp = val_curr
+                cant = 0.0
+                unidad = "Kg/U"
+
+                # Buscar la cantidad en la siguiente celda
+                if i + 1 < len(vals):
+                    cant = extraer_num(vals[i + 1])
+                    # Si la subsiguiente celda tiene la unidad (ej. Kg, Lt, U)
+                    if i + 2 < len(vals) and len(vals[i + 2]) <= 5 and not vals[i + 2].isdigit():
+                        unidad = vals[i + 2]
+
+                componentes.append({
+                    "componente": nombre_comp,
+                    "cantidad": cant,
+                    "unidad": unidad
+                })
+                i += 2
+            else:
+                i += 1
         else:
             i += 1
     return componentes
@@ -288,13 +274,14 @@ st.sidebar.divider()
 # ------------------------------------------
 if modo_app == "📋 Ficha Técnica de Producto (N3)":
     st.markdown("## 📋 Ficha Técnica Interactiva de Producto Terminado")
-    st.caption("Consulta el costo, precios de venta, márgenes y la estructura multinivel de cualquier producto (N3).")
+    st.caption("Consulta el costo, precios de venta, márgenes y desglosa la estructura multinivel de recetas.")
 
     try:
         df_lista_n3 = cargar_pestaña("Lista_N3")
         df_recetas_n3 = cargar_pestaña("Recetas_N3")
         df_recetas_n2 = cargar_pestaña("Recetas_N2")
         df_recetas_n1 = cargar_pestaña("Recetas_N1")
+        df_mermas = cargar_pestaña("Mermas_Costos")
 
         col_nom_n3 = df_lista_n3.columns[0]
         col_cod_n3 = df_lista_n3.columns[1] if len(df_lista_n3.columns) > 1 else col_nom_n3
@@ -317,7 +304,7 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
             costo_r3, pv1, pv2, pv3 = obtener_precios_y_costo_n3(fila_master)
 
             st.divider()
-            st.markdown(f"### 🎂 {nombre_p} <small style='color:#777;'>(Código: {codigo_p})</small>", unsafe_allow_html=True)
+            st.markdown(f"### 🎂 {nombre_p} <small style='color:#777;'>(Código ERP: {codigo_p})</small>", unsafe_allow_html=True)
 
             # --- METRICAS DE PRECIOS Y MARGENES ---
             st.markdown("##### 💵 Análisis de Costo & Márgenes")
@@ -349,8 +336,8 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
 
             st.divider()
 
-            # --- DESGLOSE DE RECETA N3 ---
-            st.markdown("##### 🔍 Estructura Multinivel de Recetas (Haz clic para desglosar)")
+            # --- DESGLOSE DE ESTRUCTURA MULTINIVEL ---
+            st.markdown("##### 🌳 Estructura Multinivel Desglosada")
 
             # Buscar la receta en Recetas_N3
             match_r3 = df_recetas_n3[
@@ -364,68 +351,111 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
             if not match_r3.empty:
                 comp_n3 = extraer_componentes_receta(match_r3.iloc[0])
 
-                if comp_n3:
-                    for comp in comp_n3:
-                        nombre_c = comp["componente"]
-                        cant_c = comp["cantidad"]
+                # Clasificar componentes por tipo
+                materia_prima_list = []
+                recetas_n1_list = []
+                recetas_n2_list = []
 
-                        # Verificar si este componente es una Receta N2 o N1
-                        norm_c = normalizar_cod(nombre_c)
-                        fuzzy_c = limpiar_texto_comparar(nombre_c)
+                for comp in comp_n3:
+                    nombre_c = comp["componente"]
+                    cant_c = comp["cantidad"]
+                    unid_c = comp["unidad"]
 
-                        match_sub_n2 = df_recetas_n2[
-                            (df_recetas_n2.iloc[:, 0].apply(normalizar_cod) == norm_c)
-                            | (df_recetas_n2.iloc[:, 0].apply(limpiar_texto_comparar) == fuzzy_c)
+                    norm_c = normalizar_cod(nombre_c)
+                    fuzzy_c = limpiar_texto_comparar(nombre_c)
+
+                    # Verificar si es N2
+                    match_sub_n2 = df_recetas_n2[
+                        (df_recetas_n2.iloc[:, 0].apply(normalizar_cod) == norm_c)
+                        | (df_recetas_n2.iloc[:, 0].apply(limpiar_texto_comparar) == fuzzy_c)
+                    ]
+
+                    # Verificar si es N1
+                    match_sub_n1 = df_recetas_n1[
+                        (df_recetas_n1.iloc[:, 0].apply(normalizar_cod) == norm_c)
+                        | (df_recetas_n1.iloc[:, 0].apply(limpiar_texto_comparar) == fuzzy_c)
+                    ]
+
+                    if not match_sub_n2.empty:
+                        recetas_n2_list.append((nombre_c, cant_c, unid_c, match_sub_n2.iloc[0]))
+                    elif not match_sub_n1.empty:
+                        recetas_n1_list.append((nombre_c, cant_c, unid_c, match_sub_n1.iloc[0]))
+                    else:
+                        # Buscar código de materia prima
+                        match_mp = df_mermas[
+                            (df_mermas.iloc[:, 0].apply(limpiar_texto_comparar) == fuzzy_c)
+                            | (df_mermas.iloc[:, 1].apply(normalizar_cod) == norm_c)
                         ]
+                        cod_mp = limpiar_cod_mostrar(match_mp.iloc[0, 1]) if not match_mp.empty else norm_c
+                        materia_prima_list.append((cod_mp, nombre_c, cant_c, unid_c))
 
-                        match_sub_n1 = df_recetas_n1[
-                            (df_recetas_n1.iloc[:, 0].apply(normalizar_cod) == norm_c)
-                            | (df_recetas_n1.iloc[:, 0].apply(limpiar_texto_comparar) == fuzzy_c)
-                        ]
+                # --- MOSTRAR GRUPO: MATERIA PRIMA ---
+                with st.expander(f"🔹 **Materia Prima Directa** ({len(materia_prima_list)} insumos)", expanded=True):
+                    if materia_prima_list:
+                        df_mp = pd.DataFrame(materia_prima_list, columns=["Código ERP", "Nombre del Insumo", "Cantidad", "Unidad"])
+                        st.dataframe(df_mp, use_container_width=True)
+                    else:
+                        st.write("No contiene Materia Prima directa.")
 
-                        if not match_sub_n2.empty:
-                            # Es una Sub-Receta N2
-                            with st.expander(f"🟠 **[N2] {nombre_c}** — Cantidad: {cant_c:.3f} Kg/U"):
-                                st.caption("Componentes internos de esta Sub-Receta N2:")
-                                sub_comps = extraer_componentes_receta(match_sub_n2.iloc[0])
-                                if sub_comps:
-                                    df_sub = pd.DataFrame(sub_comps)
-                                    df_sub.columns = ["Ingrediente / Componente", "Cantidad"]
-                                    st.dataframe(df_sub, use_container_width=True)
-                                else:
-                                    st.write("Sin detalle de ingredientes.")
+                # --- MOSTRAR GRUPO: RECETAS N1 ---
+                if recetas_n1_list:
+                    st.markdown("##### 🔴 Recetas N1 (Sub-Recetas Base)")
+                    for nom_n1, cant_n1, unid_n1, fila_n1 in recetas_n1_list:
+                        cod_n1 = normalizar_cod(nom_n1)
+                        with st.expander(f"🔴 **({cod_n1}) - {nom_n1}** — {cant_n1:.3f} {unid_n1}"):
+                            st.caption("Composición interna de esta Sub-Receta N1:")
+                            sub_comps = extraer_componentes_receta(fila_n1)
+                            if sub_comps:
+                                df_sub = pd.DataFrame(sub_comps)
+                                df_sub.columns = ["Componente / Insumo", "Cantidad", "Unidad"]
+                                st.dataframe(df_sub, use_container_width=True)
+                            else:
+                                st.write("Sin detalle registrado.")
 
-                        elif not match_sub_n1.empty:
-                            # Es una Sub-Receta N1
-                            with st.expander(f"🔴 **[N1] {nombre_c}** — Cantidad: {cant_c:.3f} Kg/U"):
-                                st.caption("Componentes internos de esta Sub-Receta N1:")
-                                sub_comps = extraer_componentes_receta(match_sub_n1.iloc[0])
-                                if sub_comps:
-                                    df_sub = pd.DataFrame(sub_comps)
-                                    df_sub.columns = ["Ingrediente / Componente", "Cantidad"]
-                                    st.dataframe(df_sub, use_container_width=True)
-                                else:
-                                    st.write("Sin detalle de ingredientes.")
-                        else:
-                            # Es Materia Prima directa
-                            st.markdown(f"🔹 **[Materia Prima]** `{nombre_c}` — **{cant_c:.3f} Kg/U**")
-                else:
-                    st.info("La receta N3 no tiene ingredientes registrados.")
+                # --- MOSTRAR GRUPO: RECETAS N2 ---
+                if recetas_n2_list:
+                    st.markdown("##### 🟠 Recetas N2 (Intermedios / Rellenos)")
+                    for nom_n2, cant_n2, unid_n2, fila_n2 in recetas_n2_list:
+                        cod_n2 = normalizar_cod(nom_n2)
+                        with st.expander(f"🟠 **({cod_n2}) - {nom_n2}** — {cant_n2:.3f} {unid_n2}"):
+                            st.caption("Composición interna de esta Receta N2:")
+                            sub_comps_n2 = extraer_componentes_receta(fila_n2)
+
+                            if sub_comps_n2:
+                                for sub_c in sub_comps_n2:
+                                    s_nom = sub_c["componente"]
+                                    s_cant = sub_c["cantidad"]
+                                    s_unid = sub_c["unidad"]
+                                    s_norm = normalizar_cod(s_nom)
+
+                                    # Verificar si este ingrediente de N2 es una N1
+                                    match_inner_n1 = df_recetas_n1[
+                                        (df_recetas_n1.iloc[:, 0].apply(normalizar_cod) == s_norm)
+                                        | (df_recetas_n1.iloc[:, 0].apply(limpiar_texto_comparar) == limpiar_texto_comparar(s_nom))
+                                    ]
+
+                                    if not match_inner_n1.empty:
+                                        with st.expander(f"🔴 **[N1 interna] ({s_norm}) - {s_nom}** — {s_cant:.3f} {s_unid}"):
+                                            inner_comps = extraer_componentes_receta(match_inner_n1.iloc[0])
+                                            df_inner = pd.DataFrame(inner_comps)
+                                            st.dataframe(df_inner, use_container_width=True)
+                                    else:
+                                        st.markdown(f"• **[{s_norm}] {s_nom}** — {s_cant:.3f} {s_unid}")
+                            else:
+                                st.write("Sin detalle registrado.")
+
             else:
-                st.warning("No se encontró el desglose en la pestaña Recetas_N3 para este producto.")
+                st.warning("No se encontró el desglose de esta receta en Recetas_N3.")
 
     except Exception as e:
-        st.error(f"Error al generar Ficha Técnica: {e}")
-
+        st.error(f"Error al generar la Ficha Técnica: {e}")
 
 # ------------------------------------------
 # MODO 2: SIMULACIÓN FINANCIERA MULTINIVEL
 # ------------------------------------------
 elif modo_app == "🍰 Simulación Financiera Multinivel":
     st.markdown("## 🍰 Simulación Financiera Proporcional")
-    st.caption(
-        "Simula el impacto en cadena de la materia prima hacia Sub-Recetas (N1), Intermedios (N2) y Productos Finales (N3)."
-    )
+    st.caption("Simula el impacto de variaciones de precio en materia prima sobre N1, N2 y N3.")
 
     try:
         df_mermas = cargar_pestaña("Mermas_Costos")
