@@ -9,7 +9,7 @@ st.set_page_config(
 )
 
 st.title("🍳 Recetario Inteligente & Centro de Control")
-st.caption("Simulación Financiera Multicolumna Multinivel Exacta por Código ERP")
+st.caption("Simulación Financiera Multilevel Exacta (Cantidad × Variación de Costo)")
 st.divider()
 
 ID_HOJA = "1Y8Dzxl_1jVCUrceAQVfSc94RNugo2cgRsrHJwXLwmU4"
@@ -24,7 +24,7 @@ def cargar_pestaña(nombre_pestaña):
 
 
 def limpiar_codigo(val):
-    if pd.isna(val) or str(val).strip() in ["", "-", "nan"]:
+    if pd.isna(val) or str(val).strip() in ["", "-", "nan", "NO SE ENCONTRO", "NADA"]:
         return ""
     val_str = str(val).strip()
     if val_str.endswith(".0"):
@@ -72,9 +72,7 @@ if modo_app == "📋 Explorador de Tablas":
             df = cargar_pestaña(pestaña_activa)
 
         st.subheader(f"📊 Vista de Datos: {pestaña_activa}")
-        busqueda = st.text_input(
-            f"🔍 Buscar en {pestaña_activa} (código, nombre):"
-        )
+        busqueda = st.text_input(f"🔍 Buscar en {pestaña_activa}:")
 
         if busqueda:
             mascara = df.apply(
@@ -92,9 +90,9 @@ if modo_app == "📋 Explorador de Tablas":
         st.error(f"Error al cargar {pestaña_activa}: {e}")
 
 elif modo_app == "💥 Simulación Financiera Multinivel":
-    st.header("💥 Simulación Multicolumna (Materia Prima + Sub-Recetas N1/N2)")
+    st.header("💥 Simulación por Posición Exacta de Columnas")
     st.info(
-        "Escanéo integral de columnas: detecta insumos directamente o integrados como sub-receta en N1, N2 y N3."
+        "Fórmula aplicada: Variación Total (Bs) = Cantidad Usada × Delta Precio Insumo"
     )
 
     try:
@@ -126,9 +124,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
             + df_mermas_validos[col_nom_mermas].astype(str).str.strip()
         )
 
-        lista_opciones = sorted(
-            df_mermas_validos["COMBO_LABEL"].unique().tolist()
-        )
+        lista_opciones = sorted(df_mermas_validos["COMBO_LABEL"].unique().tolist())
 
         st.subheader("1️⃣ Selecciona el Código del Insumo a Simular")
         opcion_elegida = st.selectbox(
@@ -185,29 +181,24 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
             l3 = preparar_lista(df_lista_n3)
 
             # --- EVALUAR RECETAS N1 ---
+            # Asume Col A: Receta Padre, Col C: Insumo Cod, Col E/I: Cantidad
             impactos_n1 = {}
-            filas_n1 = []
-
-            for index, row in df_recetas_n1.iterrows():
-                row_vals = [limpiar_codigo(v) for v in row.values]
-                if not row_vals[0]:
+            for _, row in df_recetas_n1.iterrows():
+                vals = list(row.values)
+                if len(vals) < 3:
+                    continue
+                receta_padre = limpiar_codigo(vals[0])
+                if not receta_padre:
                     continue
 
-                receta_padre = row_vals[0]
-                # Buscar en todas las celdas de la fila
-                if codigo_target in row_vals[1:]:
-                    cant_usada = 0.0
-                    for v in row.values:
-                        num = extraer_num(v)
-                        if num > 0 and num < 1000:
-                            cant_usada = num
-                            break
+                cod_insumo = limpiar_codigo(vals[2]) if len(vals) > 2 else ""
+                cant_usada = extraer_num(vals[4]) if len(vals) > 4 else 0.0
 
-                    inc_total = (cant_usada if cant_usada > 0 else 1.0) * dif_precio
-                    impactos_n1[receta_padre] = (
-                        impactos_n1.get(receta_padre, 0.0) + inc_total
-                    )
+                if cod_insumo == codigo_target and cant_usada > 0:
+                    inc = cant_usada * dif_precio
+                    impactos_n1[receta_padre] = impactos_n1.get(receta_padre, 0.0) + inc
 
+            filas_n1 = []
             for cod_rec, inc_total in impactos_n1.items():
                 master = l1[l1["COD_KEY"] == cod_rec]
                 costo_base = master.iloc[0]["COSTO_VAL"] if not master.empty else 0.0
@@ -225,28 +216,27 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
 
             # --- EVALUAR RECETAS N2 ---
             impactos_n2 = {}
-            filas_n2 = []
-
-            for index, row in df_recetas_n2.iterrows():
-                row_vals = [limpiar_codigo(v) for v in row.values]
-                if not row_vals[0]:
+            for _, row in df_recetas_n2.iterrows():
+                vals = list(row.values)
+                if len(vals) < 3:
+                    continue
+                receta_padre = limpiar_codigo(vals[0])
+                if not receta_padre:
                     continue
 
-                receta_padre = row_vals[0]
-                inc_fila = 0.0
+                cod_insumo = limpiar_codigo(vals[2]) if len(vals) > 2 else ""
+                cant_usada = extraer_num(vals[4]) if len(vals) > 4 else 0.0
 
-                if codigo_target in row_vals[1:]:
-                    inc_fila += dif_precio
+                inc = 0.0
+                if cod_insumo == codigo_target and cant_usada > 0:
+                    inc += cant_usada * dif_precio
+                elif cod_insumo in impactos_n1 and cant_usada > 0:
+                    inc += cant_usada * impactos_n1[cod_insumo]
 
-                for cod_n1, inc_n1 in impactos_n1.items():
-                    if cod_n1 in row_vals[1:]:
-                        inc_fila += inc_n1
+                if inc > 0:
+                    impactos_n2[receta_padre] = impactos_n2.get(receta_padre, 0.0) + inc
 
-                if inc_fila > 0:
-                    impactos_n2[receta_padre] = (
-                        impactos_n2.get(receta_padre, 0.0) + inc_fila
-                    )
-
+            filas_n2 = []
             for cod_rec, inc_total in impactos_n2.items():
                 master = l2[l2["COD_KEY"] == cod_rec]
                 costo_base = master.iloc[0]["COSTO_VAL"] if not master.empty else 0.0
@@ -263,41 +253,50 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 })
 
             # --- EVALUAR RECETAS N3 ---
+            # Según tu Google Sheet:
+            # Col A (0): Nombre Receta N3
+            # Col C (2): Código MP | Col E (4): Cantidad MP
+            # Col H (7): Código N1 | Col I (8): Cantidad N1
+            # Col L (11): Código N2 | Col M (12): Cantidad N2
             impactos_n3 = {}
-            filas_n3 = []
 
-            for index, row in df_recetas_n3.iterrows():
-                row_vals = [str(v).strip() for v in row.values]
-                row_codes = [limpiar_codigo(v) for v in row.values]
+            for _, row in df_recetas_n3.iterrows():
+                vals = list(row.values)
+                if not vals:
+                    continue
 
-                # Nombre/Código del Producto N3 (Columna A)
-                receta_padre_nombre = row_vals[0]
-                if not receta_padre_nombre:
+                nombre_n3 = str(vals[0]).strip()
+                if not nombre_n3 or nombre_n3.upper() in ["NAN", ""]:
                     continue
 
                 inc_fila = 0.0
 
-                # Check 1: ¿Usa la Materia Prima directamente?
-                if codigo_target in row_codes:
-                    inc_fila += dif_precio
+                # 1. Chequeo Materia Prima Directa (Col C y E)
+                if len(vals) > 4:
+                    cod_mp = limpiar_codigo(vals[2])
+                    cant_mp = extraer_num(vals[4])
+                    if cod_mp == codigo_target and cant_mp > 0:
+                        inc_fila += cant_mp * dif_precio
 
-                # Check 2: ¿Usa alguna Sub-Receta N1 afectada?
-                for cod_n1, inc_n1 in impactos_n1.items():
-                    if cod_n1 in row_codes:
-                        inc_fila += inc_n1
+                # 2. Chequeo Sub-Receta N1 (Col H e I)
+                if len(vals) > 8:
+                    cod_n1 = limpiar_codigo(vals[7])
+                    cant_n1 = extraer_num(vals[8])
+                    if cod_n1 in impactos_n1 and cant_n1 > 0:
+                        inc_fila += cant_n1 * impactos_n1[cod_n1]
 
-                # Check 3: ¿Usa alguna Sub-Receta N2 afectada?
-                for cod_n2, inc_n2 in impactos_n2.items():
-                    if cod_n2 in row_codes:
-                        inc_fila += inc_n2
+                # 3. Chequeo Sub-Receta N2 (Col L y M)
+                if len(vals) > 12:
+                    cod_n2 = limpiar_codigo(vals[11])
+                    cant_n2 = extraer_num(vals[12])
+                    if cod_n2 in impactos_n2 and cant_n2 > 0:
+                        inc_fila += cant_n2 * impactos_n2[cod_n2]
 
                 if inc_fila > 0:
-                    impactos_n3[receta_padre_nombre] = (
-                        impactos_n3.get(receta_padre_nombre, 0.0) + inc_fila
-                    )
+                    impactos_n3[nombre_n3] = impactos_n3.get(nombre_n3, 0.0) + inc_fila
 
+            filas_n3 = []
             for nom_rec, inc_total in impactos_n3.items():
-                # Buscar en Lista_N3 por coincidencia de nombre o código
                 master = l3[
                     (l3["NOM_KEY"].str.strip().str.upper() == nom_rec.upper())
                     | (l3["COD_KEY"] == limpiar_codigo(nom_rec))
