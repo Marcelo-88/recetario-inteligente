@@ -17,7 +17,9 @@ ID_HOJA = "1Y8Dzxl_1jVCUrceAQVfSc94RNugo2cgRsrHJwXLwmU4"
 @st.cache_data(ttl=60)
 def cargar_pestaña(nombre_pestaña):
     url = f"https://docs.google.com/spreadsheets/d/{ID_HOJA}/gviz/tq?tqx=out:csv&sheet={nombre_pestaña}"
-    return pd.read_csv(url)
+    df = pd.read_csv(url)
+    df.columns = df.columns.str.strip()
+    return df
 
 
 # 1. Menú Principal
@@ -124,14 +126,14 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
             articulo_val = str(datos_insumo[col_articulo]).strip()
             recetario_val = str(datos_insumo[col_recetario]).strip()
 
-            costo_actual = 19.59
+            costo_actual = 0.0
             for col in df_mermas.columns:
                 if "COSTO" in col.upper() or "PRECIO" in col.upper():
                     try:
                         val = float(
                             str(datos_insumo[col])
                             .replace("Bs", "")
-                            .replace(",", "")
+                            .replace(",", ".")
                             .strip()
                         )
                         if val > 0:
@@ -147,7 +149,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 nuevo_precio = st.number_input(
                     "Nuevo precio simulado (Bs):",
                     min_value=0.0,
-                    value=25.00,
+                    value=float(costo_actual * 1.20) if costo_actual > 0 else 10.0,
                     step=1.0,
                 )
             with c3:
@@ -245,24 +247,17 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 .tolist()
             )
 
-            # --- FUNCION REUTILIZABLE CON PONDERACIÓN DE CANTIDAD ---
+            # --- FUNCIÓN DE CONSTRUCCIÓN DE TABLAS ---
             def construir_tabla_ejecutiva(
                 df_lista, df_recetas_afectadas, nombres_afectados
             ):
-                if df_lista.empty or df_recetas_afectadas.empty:
+                if df_lista.empty or df_recetas_afectadas.empty or not nombres_afectados:
                     return pd.DataFrame()
 
                 col_prod = df_lista.columns[0]
                 col_receta_prod = df_recetas_afectadas.columns[0]
 
-                # Identificar columna de cantidad/peso en la tabla de recetas
-                col_cant = None
-                for c in df_recetas_afectadas.columns:
-                    if any(k in c.upper() for k in ["CANT", "PESO", "BRUTO", "NETO"]):
-                        col_cant = c
-                        break
-
-                # Filtrar lista consolidada
+                # Filtrar la lista de precios por los productos afectados
                 df_filtrado = df_lista[
                     df_lista[col_prod].astype(str).isin(nombres_afectados)
                 ].copy()
@@ -270,7 +265,6 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 if df_filtrado.empty:
                     return pd.DataFrame()
 
-                # Columnas de Estado y Costo
                 col_estado = next(
                     (c for c in df_filtrado.columns if "ESTADO" in c.upper()), "N/A"
                 )
@@ -297,18 +291,21 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                     estado = row[col_estado] if col_estado in row else "Activo"
                     costo_base = extraer_num(row[col_costo]) if col_costo else 0.0
 
-                    # Buscar la cantidad usada en la receta correspondiente
+                    # Buscar las filas en las recetas donde se usa este producto
                     filas_ing = df_recetas_afectadas[
                         df_recetas_afectadas[col_receta_prod].astype(str) == nombre_prod
                     ]
-                    
-                    cantidad_usada = 1.0
-                    if col_cant and not filas_ing.empty:
-                        cant_extraida = extraer_num(filas_ing.iloc[0][col_cant])
-                        if cant_extraida > 0:
-                            cantidad_usada = cant_extraida
 
-                    # Ponderación correcta del impacto
+                    # Sumar las cantidades utilizadas en todas las columnas de cantidad posibles
+                    cantidad_usada = 0.0
+                    for c in filas_ing.columns:
+                        if any(k in c.upper() for k in ["CANT", "PESO", "BRUTO", "NETO"]):
+                            cant_col = filas_ing[c].apply(extraer_num).sum()
+                            cantidad_usada += cant_col
+
+                    if cantidad_usada == 0:
+                        cantidad_usada = 1.0
+
                     impacto_bs = dif_precio * cantidad_usada
                     costo_simulado = costo_base + impacto_bs
                     var_porc = (impacto_bs / costo_base * 100) if costo_base > 0 else 0.0
@@ -325,7 +322,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
 
                 return pd.DataFrame(filas_resumen)
 
-            # Construir DataFrames Limpios con Ponderación
+            # Construir DataFrames
             resumen_l3 = construir_tabla_ejecutiva(
                 df_lista_n3, afectadas_recetas_n3, subrecetas_n3_nombres
             )
@@ -338,7 +335,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
 
             # --- PRESENTACIÓN VISUAL EN PESTAÑAS ---
             st.subheader(
-                f"📊 Comparativa Ejecutiva de Productos Afectados por: **{codigo_val}**"
+                f"📊 Comparativa Ejecutiva de Productos Afectados por: **{recetario_val}** ({codigo_val})"
             )
 
             resumen_tabs1, resumen_tabs2, resumen_tabs3 = st.tabs(
@@ -350,47 +347,31 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
             )
 
             with resumen_tabs1:
-                st.write(
-                    f"**Productos Finales N3 Afectados:** {len(resumen_l3)}"
-                )
+                st.write(f"**Productos Finales N3 Afectados:** {len(resumen_l3)}")
                 if not resumen_l3.empty:
                     st.dataframe(resumen_l3, use_container_width=True)
                 else:
-                    st.info(
-                        "No se encontraron coincidencias consolidadas en Lista_N3."
-                    )
+                    st.info("No se encontraron coincidencias consolidadas en Lista_N3.")
 
             with resumen_tabs2:
-                st.write(
-                    f"**Productos Intermedios N2 Afectados:** {len(resumen_l2)}"
-                )
+                st.write(f"**Productos Intermedios N2 Afectados:** {len(resumen_l2)}")
                 if not resumen_l2.empty:
                     st.dataframe(resumen_l2, use_container_width=True)
                 else:
-                    st.info(
-                        "No se encontraron coincidencias consolidadas en Listas_N2."
-                    )
+                    st.info("No se encontraron coincidencias consolidadas en Listas_N2.")
 
             with resumen_tabs3:
-                st.write(
-                    f"**Sub-Recetas N1 Afectadas:** {len(resumen_l1)}"
-                )
+                st.write(f"**Sub-Recetas N1 Afectadas:** {len(resumen_l1)}")
                 if not resumen_l1.empty:
                     st.dataframe(resumen_l1, use_container_width=True)
                 else:
-                    st.info(
-                        "No se encontraron coincidencias consolidadas en Lista_N1."
-                    )
+                    st.info("No se encontraron coincidencias consolidadas en Lista_N1.")
 
             st.divider()
 
             # --- AUDITORÍA DE RECETAS DETALLADAS ---
-            with st.expander(
-                "🔍 Auditar Recetas Detalladas (Ingrediente por Ingrediente)"
-            ):
-                st.caption(
-                    "Pestañas de respaldo técnico con todas las columnas e ingredientes originales."
-                )
+            with st.expander("🔍 Auditar Recetas Detalladas (Ingrediente por Ingrediente)"):
+                st.caption("Pestañas de respaldo técnico con todas las columnas e ingredientes originales.")
                 d_tab1, d_tab2, d_tab3 = st.tabs(
                     [
                         "Detalle Recetas_N3",
@@ -400,17 +381,11 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 )
 
                 with d_tab1:
-                    st.dataframe(
-                        afectadas_recetas_n3, use_container_width=True
-                    )
+                    st.dataframe(afectadas_recetas_n3, use_container_width=True)
                 with d_tab2:
-                    st.dataframe(
-                        afectadas_recetas_n2, use_container_width=True
-                    )
+                    st.dataframe(afectadas_recetas_n2, use_container_width=True)
                 with d_tab3:
-                    st.dataframe(
-                        afectadas_recetas_n1, use_container_width=True
-                    )
+                    st.dataframe(afectadas_recetas_n1, use_container_width=True)
 
     except Exception as e:
         st.error(f"Error durante el cálculo de la simulación: {e}")
