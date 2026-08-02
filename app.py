@@ -33,10 +33,6 @@ def normalizar_cod(val):
 
 
 def limpiar_texto_comparar(val):
-    """
-    Limpia texto quitando espacios, tildes y caracteres especiales para poder
-    cruzar 'MASADECHOCOLATE' con 'Masa de Chocolate'.
-    """
     if pd.isna(val):
         return ""
     v = str(val).strip().upper()
@@ -75,15 +71,25 @@ def buscar_columna_mermas(df_mermas):
 
 
 def buscar_columna_costo_master(df, nivel="3"):
+    # 1. Búsqueda explícita de "Costo Por Kilo a usar" o "Costo Por Kilo"
+    for col in df.columns:
+        c_u = str(col).strip().upper()
+        if "COSTO POR KILO" in c_u or "COSTO POR UNIDAD" in c_u:
+            return col
+
+    # 2. Búsqueda por patrón COSTO R1, COSTO R2, COSTO R3
     patron = f"COSTO R{nivel}"
     for col in df.columns:
         if patron in str(col).strip().upper():
             return col
+
+    # 3. Búsqueda general por COSTO
     for col in df.columns:
         c_u = str(col).upper()
-        if "COSTO" in c_u and "PRECIO" not in c_u:
+        if "COSTO" in c_u and "TOTAL" not in c_u:
             return col
-    return df.columns[-1]
+
+    return df.columns[-1] if len(df.columns) > 0 else ""
 
 
 def obtener_rendimiento_total_batch(row_values):
@@ -114,7 +120,7 @@ if modo_app == "📋 Explorador de Tablas":
             "Recetas_N3",
             "Lista_N3",
             "Recetas_N2",
-            "Listas_N2",
+            "Lista_N2",
             "Recetas_N1",
             "Lista_N1",
             "Materia_Prima",
@@ -154,7 +160,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
         df_recetas_n3 = cargar_pestaña("Recetas_N3")
 
         df_lista_n1 = cargar_pestaña("Lista_N1")
-        df_lista_n2 = cargar_pestaña("Listas_N2")
+        df_lista_n2 = cargar_pestaña("Lista_N2")  # <-- Corregido sin "s"
         df_lista_n3 = cargar_pestaña("Lista_N3")
 
         col_nom_m = df_mermas.columns[0]
@@ -226,6 +232,9 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
             st.divider()
 
             def consultar_master_gen(df_lista, busqueda_str, nivel="3"):
+                if df_lista.empty:
+                    return 0.0, "-", str(busqueda_str).strip()
+
                 col_nom = df_lista.columns[0]
                 col_cod = (
                     df_lista.columns[1] if len(df_lista.columns) > 1 else col_nom
@@ -235,20 +244,28 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 query_norm = normalizar_cod(busqueda_str)
                 query_fuzzy = limpiar_texto_comparar(busqueda_str)
 
-                # Intentamos cruce por código normalizado o texto flexible sin espacios
+                # Estrategia 1: Coincidencia por Código o Nombre limpio
                 match = df_lista[
                     (df_lista[col_cod].apply(normalizar_cod) == query_norm)
                     | (df_lista[col_nom].apply(limpiar_texto_comparar) == query_fuzzy)
                     | (df_lista[col_cod].apply(limpiar_texto_comparar) == query_fuzzy)
                 ]
 
+                # Estrategia 2: Búsqueda parcial si no coincide exacto
+                if match.empty and len(query_fuzzy) > 3:
+                    match = df_lista[
+                        df_lista[col_nom].apply(limpiar_texto_comparar).str.contains(query_fuzzy, regex=False)
+                        | df_lista[col_cod].apply(limpiar_texto_comparar).str.contains(query_fuzzy, regex=False)
+                    ]
+
                 if not match.empty:
-                    c_base = extraer_num(match.iloc[0][col_costo])
-                    c_show = limpiar_cod_mostrar(match.iloc[0][col_cod])
-                    n_show = str(match.iloc[0][col_nom]).strip()
+                    fila = match.iloc[0]
+                    c_base = extraer_num(fila[col_costo])
+
+                    c_show = limpiar_cod_mostrar(fila[col_cod])
+                    n_show = str(fila[col_nom]).strip()
                     return c_base, c_show, n_show
 
-                # Si no encuentra código, intenta limpiar el nombre para mostrarlo mejor
                 return 0.0, "-", str(busqueda_str).strip()
 
             # --- 1. RECETAS N1 (Sub-Recetas Base) ---
@@ -258,11 +275,10 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 vals = [str(v).strip() for v in row.values]
                 if not vals or not vals[0]:
                     continue
+                receta_padre_key = vals[0]
                 receta_padre_norm = normalizar_cod(vals[0])
                 if not receta_padre_norm:
-                    receta_padre_norm = vals[0]
-                if not receta_padre_norm:
-                    continue
+                    receta_padre_norm = receta_padre_key
 
                 row_norms = [normalizar_cod(v) for v in vals]
                 if codigo_target_norm in row_norms[1:]:
@@ -278,15 +294,15 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                     rendimiento_batch = obtener_rendimiento_total_batch(vals)
 
                     var_por_kilo = inc_batch / rendimiento_batch
-                    impactos_n1_kilo[receta_padre_norm] = (
-                        impactos_n1_kilo.get(receta_padre_norm, 0.0)
+                    impactos_n1_kilo[receta_padre_key] = (
+                        impactos_n1_kilo.get(receta_padre_key, 0.0)
                         + var_por_kilo
                     )
 
             filas_n1 = []
-            for cod_norm, var_kilo in impactos_n1_kilo.items():
+            for key_n1, var_kilo in impactos_n1_kilo.items():
                 costo_base_kg, cod_show, nom_show = consultar_master_gen(
-                    df_lista_n1, cod_norm, "1"
+                    df_lista_n1, key_n1, "1"
                 )
                 costo_sim_kg = costo_base_kg + var_kilo
                 porc_var = (
@@ -311,13 +327,8 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 vals = [str(v).strip() for v in row.values]
                 if not vals or not vals[0]:
                     continue
-                
-                # Guardamos la clave N2 (ya sea código o texto)
-                receta_padre_key = vals[0]
-                receta_padre_norm = normalizar_cod(vals[0])
-                if not receta_padre_norm:
-                    receta_padre_norm = receta_padre_key
 
+                receta_padre_key = vals[0]
                 row_norms = [normalizar_cod(v) for v in vals]
                 inc_batch_n2 = 0.0
 
@@ -333,9 +344,13 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                     inc_batch_n2 += cant * dif_precio_unitario
 
                 # N1 consumido en N2
-                for cod_n1_norm, var_kilo_n1 in impactos_n1_kilo.items():
-                    if cod_n1_norm in row_norms[1:]:
-                        idx = row_norms[1:].index(cod_n1_norm) + 1
+                for key_n1, var_kilo_n1 in impactos_n1_kilo.items():
+                    norm_n1 = normalizar_cod(key_n1)
+                    fuzzy_n1 = limpiar_texto_comparar(key_n1)
+                    row_fuzzies = [limpiar_texto_comparar(v) for v in vals]
+
+                    if (norm_n1 and norm_n1 in row_norms[1:]) or (fuzzy_n1 and fuzzy_n1 in row_fuzzies[1:]):
+                        idx = row_norms[1:].index(norm_n1) + 1 if (norm_n1 and norm_n1 in row_norms[1:]) else row_fuzzies[1:].index(fuzzy_n1) + 1
                         cant_n1 = 0.0
                         for k in range(idx + 1, len(vals)):
                             num = extraer_num(vals[k])
@@ -397,10 +412,11 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                     inc_producto_final += cant * dif_precio_unitario
 
                 # N1 consumido en N3
-                for cod_n1_norm, var_kilo_n1 in impactos_n1_kilo.items():
-                    fuzzy_n1 = limpiar_texto_comparar(cod_n1_norm)
-                    if cod_n1_norm in row_norms[1:] or (fuzzy_n1 and fuzzy_n1 in row_fuzzies[1:]):
-                        idx = row_norms[1:].index(cod_n1_norm) + 1 if cod_n1_norm in row_norms[1:] else row_fuzzies[1:].index(fuzzy_n1) + 1
+                for key_n1, var_kilo_n1 in impactos_n1_kilo.items():
+                    norm_n1 = normalizar_cod(key_n1)
+                    fuzzy_n1 = limpiar_texto_comparar(key_n1)
+                    if (norm_n1 and norm_n1 in row_norms[1:]) or (fuzzy_n1 and fuzzy_n1 in row_fuzzies[1:]):
+                        idx = row_norms[1:].index(norm_n1) + 1 if (norm_n1 and norm_n1 in row_norms[1:]) else row_fuzzies[1:].index(fuzzy_n1) + 1
                         cant_n1 = 0.0
                         for k in range(idx + 1, len(vals)):
                             num = extraer_num(vals[k])
@@ -414,7 +430,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                     norm_n2 = normalizar_cod(key_n2)
                     fuzzy_n2 = limpiar_texto_comparar(key_n2)
                     if (norm_n2 and norm_n2 in row_norms[1:]) or (fuzzy_n2 and fuzzy_n2 in row_fuzzies[1:]):
-                        idx = row_norms[1:].index(norm_n2) + 1 if norm_n2 in row_norms[1:] else row_fuzzies[1:].index(fuzzy_n2) + 1
+                        idx = row_norms[1:].index(norm_n2) + 1 if (norm_n2 and norm_n2 in row_norms[1:]) else row_fuzzies[1:].index(fuzzy_n2) + 1
                         cant_n2 = 0.0
                         for k in range(idx + 1, len(vals)):
                             num = extraer_num(vals[k])
@@ -458,7 +474,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
             t3, t2, t1 = st.tabs(
                 [
                     "🟢 Productos Finales (Lista_N3)",
-                    "🟠 Rellenos / Intermedios (Listas_N2)",
+                    "🟠 Rellenos / Intermedios (Lista_N2)",
                     "🔴 Sub-Recetas Base (Lista_N1)",
                 ]
             )
