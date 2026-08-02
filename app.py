@@ -221,19 +221,25 @@ def obtener_precios_y_costo_n3(row_n3):
     return costo, pv1, pv2, pv3
 
 
-# 🔥 LÓGICA BASADA EN LAS COLUMNAS EXACTAS DEL DRIVE 🔥
+# 🔥 EXTRAER COMPONENTES CORREGIDO CON ESTRUCTURA EXACTA DE COLUMNAS 🔥
 def extraer_componentes_por_columnas(filas_receta):
     mp_list = []
     n1_list = []
     n2_list = []
 
     for _, row in filas_receta.iterrows():
-        # Materia Prima Directa (Col B=1: Nombre, Col C=2: Código, Col E=4: Cantidad, Col F=5: Unidad)
-        if len(row) > 1 and str(row.iloc[1]).strip() not in ["", "-", "NADA"]:
+        # --- MATERIA PRIMA DIRECTA ---
+        # Col B (idx 1): Nombre MP
+        # Col C (idx 2): Código ERP MP
+        # Col E (idx 4): Cantidad MP
+        # Col F (idx 5): Unidad MP (Toma real de la hoja)
+        if len(row) > 1 and str(row.iloc[1]).strip() not in ["", "-", "NADA", "nan"]:
             nom_mp = str(row.iloc[1]).strip()
             cod_mp = limpiar_cod_mostrar(row.iloc[2]) if len(row) > 2 else ""
             cant_mp = extraer_num(row.iloc[4]) if len(row) > 4 else 0.0
-            unid_mp = str(row.iloc[5]).strip() if len(row) > 5 and str(row.iloc[5]).strip() else "Empaque/Kg"
+            
+            # Unidad: Toma directamente el valor de la columna 5 (F)
+            unid_mp = str(row.iloc[5]).strip() if len(row) > 5 and str(row.iloc[5]).strip() not in ["", "-", "nan", "None"] else "-"
 
             if nom_mp and nom_mp.upper() != "MATERIA PRIMA":
                 mp_list.append({
@@ -243,12 +249,16 @@ def extraer_componentes_por_columnas(filas_receta):
                     "Unidad": unid_mp
                 })
 
-        # Recetas N1 (Col G=6: Nombre, Col H=7: Código, Col I=8: Cantidad, Col J=9: Unidad)
-        if len(row) > 6 and str(row.iloc[6]).strip() not in ["", "-", "NADA"]:
+        # --- RECETAS N1 ---
+        # Col G (idx 6): Nombre N1
+        # Col H (idx 7): Código N1
+        # Col I (idx 8): Cantidad N1
+        # Col J (idx 9): Unidad N1
+        if len(row) > 6 and str(row.iloc[6]).strip() not in ["", "-", "NADA", "nan"]:
             nom_n1 = str(row.iloc[6]).strip()
             cod_n1 = limpiar_cod_mostrar(row.iloc[7]) if len(row) > 7 else ""
             cant_n1 = extraer_num(row.iloc[8]) if len(row) > 8 else 0.0
-            unid_n1 = str(row.iloc[9]).strip() if len(row) > 9 and str(row.iloc[9]).strip() else "Kg/U"
+            unid_n1 = str(row.iloc[9]).strip() if len(row) > 9 and str(row.iloc[9]).strip() not in ["", "-", "nan"] else "Kg"
 
             if nom_n1 and nom_n1.upper() != "RECETAS N1":
                 n1_list.append({
@@ -258,12 +268,16 @@ def extraer_componentes_por_columnas(filas_receta):
                     "unidad": unid_n1
                 })
 
-        # Recetas N2 (Col K=10: Nombre, Col L=11: Código, Col M=12: Cantidad, Col N=13: Unidad)
-        if len(row) > 10 and str(row.iloc[10]).strip() not in ["", "-", "NADA"]:
+        # --- RECETAS N2 ---
+        # Col K (idx 10): Nombre N2
+        # Col L (idx 11): Código N2
+        # Col M (idx 12): Cantidad N2
+        # Col N (idx 13): Unidad N2
+        if len(row) > 10 and str(row.iloc[10]).strip() not in ["", "-", "NADA", "nan"]:
             nom_n2 = str(row.iloc[10]).strip()
             cod_n2 = limpiar_cod_mostrar(row.iloc[11]) if len(row) > 11 else ""
             cant_n2 = extraer_num(row.iloc[12]) if len(row) > 12 else 0.0
-            unid_n2 = str(row.iloc[13]).strip() if len(row) > 13 and str(row.iloc[13]).strip() else "Kg/U"
+            unid_n2 = str(row.iloc[13]).strip() if len(row) > 13 and str(row.iloc[13]).strip() not in ["", "-", "nan"] else "Kg"
 
             if nom_n2 and nom_n2.upper() != "RECETAS N2":
                 n2_list.append({
@@ -411,9 +425,10 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
                         unid_n2 = item_n2["unidad"]
 
                         with st.expander(f"🟠 **[{cod_n2}] {nom_n2}** — {cant_n2:.4f} {unid_n2}"):
-                            # Buscamos en Recetas_N2
+                            # Buscamos en Recetas_N2 por código o por nombre
                             filas_sub_n2 = df_recetas_n2[
-                                (df_recetas_n2.iloc[:, 0].apply(normalizar_cod) == normalizar_cod(nom_n2))
+                                (df_recetas_n2.iloc[:, 0].apply(normalizar_cod) == normalizar_cod(cod_n2))
+                                | (df_recetas_n2.iloc[:, 0].apply(normalizar_cod) == normalizar_cod(nom_n2))
                                 | (df_recetas_n2.iloc[:, 0].apply(limpiar_texto_comparar) == limpiar_texto_comparar(nom_n2))
                             ]
                             if not filas_sub_n2.empty:
