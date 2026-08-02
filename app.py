@@ -176,7 +176,8 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
             ]
 
             # RASTREO N1
-            patron_n1 = "|".join(terminos_busqueda)
+            terminos_n1 = terminos_busqueda
+            patron_n1 = "|".join(terminos_n1)
             afectadas_recetas_n1 = df_recetas_n1[
                 df_recetas_n1.apply(
                     lambda r: r.astype(str)
@@ -247,7 +248,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 .tolist()
             )
 
-            # --- FUNCIÓN DE CONSTRUCCIÓN DE TABLAS (CON FILTRADO ESTRICTO DE EMPAQUES) ---
+            # --- FUNCIÓN DE CONSTRUCCIÓN DE TABLAS ---
             def construir_tabla_ejecutiva(
                 df_lista, df_recetas_afectadas, nombres_afectados, datos_insumo, dif_precio, terminos_simulados
             ):
@@ -302,13 +303,11 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                     estado = row[col_estado] if col_estado in row else "Activo"
                     costo_base = extraer_num(row[col_costo]) if col_costo else 0.0
 
-                    # Obtener las filas exactas del recetario para este producto
                     filas_ing = df_recetas_afectadas[
                         df_recetas_afectadas[col_receta_prod].astype(str) == nombre_prod
                     ]
 
                     if es_empaque:
-                        # --- LÓGICA EMPAQUE: Impacto directo 1:1 ---
                         cant_empaque = 0.0
                         for c in filas_ing.columns:
                             if any(k in c.upper() for k in ["CANT", "UNID", "PIEZA"]):
@@ -322,8 +321,6 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                         cantidad_usada_mostrar = cant_empaque
 
                     else:
-                        # --- LÓGICA INGREDIENTES: Filtrar estrictamente la FILA DEL INGREDIENTE o SUBRECETA ---
-                        # 1. Filtrar filas de la receta que contengan el término que se está simulando
                         patron_busqueda = "|".join([str(t) for t in terminos_simulados if len(str(t)) > 2])
                         filas_especificas = filas_ing[
                             filas_ing.apply(
@@ -332,7 +329,6 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                             )
                         ]
 
-                        # Si no encuentra coincidencia exacta, toma las filas excluyendo empaques
                         if filas_especificas.empty:
                             filas_especificas = filas_ing[
                                 ~filas_ing.apply(
@@ -342,7 +338,6 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                             ]
 
                         peso_ingrediente = 0.0
-                        # Buscar la columna de cantidad o peso solo en la fila del ingrediente
                         cols_peso = [
                             c for c in filas_especificas.columns 
                             if any(k in c.upper() for k in ["CANT", "PESO", "NETO", "KG", "GR"]) 
@@ -356,13 +351,11 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                                     peso_ingrediente = val_c
                                     break
 
-                        # Ajuste para masa real/proporción si no se encuentra número individual
                         if peso_ingrediente <= 0 or peso_ingrediente > 1.5:
-                            # Caso de control Beso de chocolate (0.131 kg)
                             if "Beso de chocolate" in nombre_prod:
                                 peso_ingrediente = 0.131
                             else:
-                                peso_ingrediente = 0.130  # Promedio de proporción por unidad de torta N3
+                                peso_ingrediente = 0.130
 
                         impacto_bs = dif_precio * peso_ingrediente
                         cantidad_usada_mostrar = peso_ingrediente
@@ -435,8 +428,8 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 d_tab1, d_tab2, d_tab3 = st.tabs(
                     [
                         "Detalle Recetas_N3",
-                        "Detalle Recetas_N1",
                         "Detalle Recetas_N2",
+                        "Detalle Recetas_N1",
                     ]
                 )
 
