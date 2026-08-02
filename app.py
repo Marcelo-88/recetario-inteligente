@@ -221,6 +221,7 @@ def obtener_precios_y_costo_n3(row_n3):
     return costo, pv1, pv2, pv3
 
 
+# 🔥 FUNCIÓN CORREGIDA PARA EXTRAER LIMPIAMENTE LOS INGREDIENTES 🔥
 def extraer_componentes_receta(fila_receta):
     vals = [str(v).strip() for v in fila_receta.values]
     componentes = []
@@ -229,28 +230,42 @@ def extraer_componentes_receta(fila_receta):
 
     i = 1
     while i < len(vals):
-        val_curr = vals[i]
-        if val_curr and val_curr.upper() not in ["", "-", "NAN", "NO SE ENCONTRO"]:
-            if not re.match(r"^BS\.?\s*\d+", val_curr, re.IGNORECASE) and not val_curr.replace(".", "", 1).replace(",", "", 1).isdigit():
-                nombre_comp = val_curr
-                cant = 0.0
-                unidad = "Kg/U"
-
-                if i + 1 < len(vals):
-                    cant = extraer_num(vals[i + 1])
-                    if i + 2 < len(vals) and len(vals[i + 2]) <= 5 and not vals[i + 2].isdigit():
-                        unidad = vals[i + 2]
-
-                componentes.append({
-                    "componente": nombre_comp,
-                    "cantidad": cant,
-                    "unidad": unidad
-                })
-                i += 2
-            else:
-                i += 1
-        else:
+        nom = vals[i]
+        
+        # 1. Ignorar celdas vacías o encabezados que se hayan colado en la tabla
+        if not nom or nom.upper() in ["", "-", "NAN", "NO SE ENCONTRO", "NADA", "INGREDIENTE", "INSUMO", "CANTIDAD", "UNIDAD", "KG", "LTS"]:
             i += 1
+            continue
+            
+        # 2. Ignorar si la celda es un valor monetario o puramente numérico (desfase)
+        if re.match(r"^BS\.?\s*\d+", nom, re.IGNORECASE) or nom.replace(".", "", 1).replace(",", "", 1).isdigit():
+            i += 1
+            continue
+            
+        # 3. Componente válido detectado
+        cant = 0.0
+        unid = "Kg/U"
+        
+        # Buscar cantidad en la celda adyacente (i+1)
+        if i + 1 < len(vals):
+            cant = extraer_num(vals[i + 1])
+            
+        # Buscar unidad en la celda subsiguiente (i+2)
+        if i + 2 < len(vals):
+            unid_val = vals[i + 2]
+            # Solo la tomamos si no es un número (evita otro desfase)
+            if unid_val and not unid_val.replace('.', '', 1).replace(',', '', 1).isdigit() and len(unid_val) <= 12:
+                unid = unid_val
+        
+        componentes.append({
+            "componente": nom,
+            "cantidad": cant,
+            "unidad": unid
+        })
+        
+        # Avanzar estrictamente de 3 en 3 (Estructura: Insumo | Cantidad | Unidad)
+        i += 3
+        
     return componentes
 
 
@@ -381,12 +396,12 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
                             | (df_mermas.iloc[:, 1].apply(normalizar_cod) == norm_c)
                         ]
                         cod_mp = limpiar_cod_mostrar(match_mp.iloc[0, 1]) if not match_mp.empty else norm_c
-                        materia_prima_list.append((cod_mp, nombre_c, cant_c, unid_c))
+                        materia_prima_list.append((cod_mp, nombre_c, f"{cant_c:.4f}", unid_c))
 
                 with st.expander(f"🔹 **Materia Prima Directa** ({len(materia_prima_list)} insumos)", expanded=True):
                     if materia_prima_list:
                         df_mp = pd.DataFrame(materia_prima_list, columns=["Código ERP", "Nombre del Insumo", "Cantidad", "Unidad"])
-                        st.dataframe(df_mp, use_container_width=True)
+                        st.dataframe(df_mp, use_container_width=True, hide_index=True)
                     else:
                         st.write("No contiene Materia Prima directa.")
 
@@ -394,13 +409,15 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
                     st.markdown("##### 🔴 Recetas N1 (Sub-Recetas Base)")
                     for nom_n1, cant_n1, unid_n1, fila_n1 in recetas_n1_list:
                         cod_n1 = normalizar_cod(nom_n1)
-                        with st.expander(f"🔴 **({cod_n1}) - {nom_n1}** — {cant_n1:.3f} {unid_n1}"):
+                        # Formato limpio para que no queden números sueltos en el título
+                        with st.expander(f"🔴 **[{cod_n1}] {nom_n1}** — {cant_n1:.4f} {unid_n1}"):
                             st.caption("Composición interna de esta Sub-Receta N1:")
                             sub_comps = extraer_componentes_receta(fila_n1)
                             if sub_comps:
                                 df_sub = pd.DataFrame(sub_comps)
                                 df_sub.columns = ["Componente / Insumo", "Cantidad", "Unidad"]
-                                st.dataframe(df_sub, use_container_width=True)
+                                df_sub["Cantidad"] = df_sub["Cantidad"].apply(lambda x: f"{x:.4f}")
+                                st.dataframe(df_sub, use_container_width=True, hide_index=True)
                             else:
                                 st.write("Sin detalle registrado.")
 
@@ -408,7 +425,7 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
                     st.markdown("##### 🟠 Recetas N2 (Intermedios / Rellenos)")
                     for nom_n2, cant_n2, unid_n2, fila_n2 in recetas_n2_list:
                         cod_n2 = normalizar_cod(nom_n2)
-                        with st.expander(f"🟠 **({cod_n2}) - {nom_n2}** — {cant_n2:.3f} {unid_n2}"):
+                        with st.expander(f"🟠 **[{cod_n2}] {nom_n2}** — {cant_n2:.4f} {unid_n2}"):
                             st.caption("Composición interna de esta Receta N2:")
                             sub_comps_n2 = extraer_componentes_receta(fila_n2)
 
@@ -425,12 +442,14 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
                                     ]
 
                                     if not match_inner_n1.empty:
-                                        with st.expander(f"🔴 **[N1 interna] ({s_norm}) - {s_nom}** — {s_cant:.3f} {s_unid}"):
+                                        with st.expander(f"🔴 **[N1 interna] [{s_norm}] {s_nom}** — {s_cant:.4f} {s_unid}"):
                                             inner_comps = extraer_componentes_receta(match_inner_n1.iloc[0])
                                             df_inner = pd.DataFrame(inner_comps)
-                                            st.dataframe(df_inner, use_container_width=True)
+                                            df_inner.columns = ["Componente / Insumo", "Cantidad", "Unidad"]
+                                            df_inner["Cantidad"] = df_inner["Cantidad"].apply(lambda x: f"{x:.4f}")
+                                            st.dataframe(df_inner, use_container_width=True, hide_index=True)
                                     else:
-                                        st.markdown(f"• **[{s_norm}] {s_nom}** — {s_cant:.3f} {s_unid}")
+                                        st.markdown(f"• **[{s_norm}] {s_nom}** — {s_cant:.4f} {s_unid}")
                             else:
                                 st.write("Sin detalle registrado.")
 
