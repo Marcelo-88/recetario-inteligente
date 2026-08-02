@@ -12,28 +12,43 @@ st.set_page_config(
 )
 
 # ==========================================
-# 2. ESTILOS Y COLORES FRIDOLIN
+# 2. ESTILOS Y COLORES FRIDOLIN (CSS PERFECCIONADO)
 # ==========================================
 CSS_FRIDOLIN = """
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
 
-    /* 1. TIPOGRAFÍA SOLO PARA EL CONTENIDO (Protege los iconos del sistema) */
-    .stApp [data-testid="stMarkdownContainer"], 
-    .stApp .stText, 
-    .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
-    .stApp label, .stApp input, .stApp select, .stApp button,
-    .stApp [data-testid="stMetricValue"], .stApp [data-testid="stMetricLabel"],
-    .stApp .stSelectbox, .stApp .stNumberInput, .stApp .stDataFrame {
+    /* 1. TIPOGRAFÍA GENERAL CONTROLADA */
+    html, body, [data-testid="stAppViewContainer"] {
         font-family: 'Poppins', sans-serif !important;
     }
 
-    /* 2. PROTECCIÓN DE ICONOS NATIVOS DE STREAMLIT */
-    [class*="material-"], [class*="st-emotion-cache"], i {
+    /* Títulos y Contenido de Texto */
+    .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
+    .stApp p, .stApp span, .stApp label, .stApp input, .stApp button,
+    [data-testid="stMarkdownContainer"] p {
+        font-family: 'Poppins', sans-serif !important;
+    }
+
+    /* Corregir Bajadas de Texto y Captions (Resuelve el texto desproporcionado) */
+    .stApp [data-testid="stCaptionContainer"],
+    .stApp small,
+    .stApp .stCaption {
+        font-family: 'Poppins', sans-serif !important;
+        font-size: 0.88rem !important;
+        letter-spacing: normal !important;
+        text-transform: none !important;
+        color: #666666 !important;
+    }
+
+    /* 2. PROTECCIÓN ESTRICTA DE ICONOS NATIVOS DE STREAMLIT */
+    [class*="material-"], 
+    [data-testid="stIcon"],
+    i {
         font-family: 'Material Symbols Rounded', 'Material Icons', sans-serif !important;
     }
 
-    /* Fondo General de la App */
+    /* Fondo General Soft */
     .stApp {
         background-color: #FAF8F5;
     }
@@ -78,7 +93,7 @@ CSS_FRIDOLIN = """
         color: #8B1D2C !important;
     }
 
-    /* Pestañas / Tabs Activas */
+    /* Tabs Activas */
     button[data-baseweb="tab"] {
         font-family: 'Poppins', sans-serif !important;
         font-weight: 600 !important;
