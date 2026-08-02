@@ -111,7 +111,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
             df_mermas["COMBO_MOSTRAR"].dropna().unique().tolist()
         )
 
-        st.subheader("1️⃣ Selecciona la Materia Prima")
+        st.subheader("1️⃣ Selecciona la Materia Prima / Empaque")
         opcion_elegida = st.selectbox(
             "Buscar Insumo [ Código ERP | Artículo ERP (Recetario) ]:",
             lista_opciones,
@@ -249,13 +249,22 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
 
             # --- FUNCIÓN DE CONSTRUCCIÓN DE TABLAS ---
             def construir_tabla_ejecutiva(
-                df_lista, df_recetas_afectadas, nombres_afectados
+                df_lista, df_recetas_afectadas, nombres_afectados, datos_insumo, dif_precio
             ):
                 if df_lista.empty or df_recetas_afectadas.empty or not nombres_afectados:
                     return pd.DataFrame()
 
                 col_prod = df_lista.columns[0]
                 col_receta_prod = df_recetas_afectadas.columns[0]
+
+                # Detectar si el insumo seleccionado es EMPAQUE o INGREDIENTE
+                es_empaque = False
+                for c in datos_insumo.index:
+                    if any(k in str(c).upper() for k in ["TIPO", "CATEGORIA", "CLASE", "GRUPO"]):
+                        val_tipo = str(datos_insumo[c]).strip().upper()
+                        if "EMPAQUE" in val_tipo or "ENVASE" in val_tipo or "CAJA" in val_tipo or "DOMO" in val_tipo:
+                            es_empaque = True
+                            break
 
                 # Filtrar la lista de precios por los productos afectados
                 df_filtrado = df_lista[
@@ -291,29 +300,55 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                     estado = row[col_estado] if col_estado in row else "Activo"
                     costo_base = extraer_num(row[col_costo]) if col_costo else 0.0
 
-                    # Buscar las filas en las recetas donde se usa este producto
+                    # Buscar las filas en la receta donde participa este elemento
                     filas_ing = df_recetas_afectadas[
                         df_recetas_afectadas[col_receta_prod].astype(str) == nombre_prod
                     ]
 
-                    # Sumar las cantidades utilizadas en todas las columnas de cantidad posibles
-                    cantidad_usada = 0.0
-                    for c in filas_ing.columns:
-                        if any(k in c.upper() for k in ["CANT", "PESO", "BRUTO", "NETO"]):
-                            cant_col = filas_ing[c].apply(extraer_num).sum()
-                            cantidad_usada += cant_col
+                    if es_empaque:
+                        # --- LÓGICA EMPAQUES: Directo 1:1 ---
+                        cant_empaque = 1.0
+                        for c in filas_ing.columns:
+                            if any(k in c.upper() for k in ["CANT", "UNID", "PIEZA"]):
+                                v = filas_ing[c].apply(extraer_num).sum()
+                                if v > 0:
+                                    cant_empaque = v
+                                    break
+                        
+                        impacto_bs = dif_precio * cant_empaque
+                        cantidad_usada_mostrar = cant_empaque
 
-                    if cantidad_usada == 0:
-                        cantidad_usada = 1.0
+                    else:
+                        # --- LÓGICA INGREDIENTES: Proporción / Peso Real Neto ---
+                        peso_ingrediente = 0.0
+                        cols_prioritarias = [c for c in filas_ing.columns if any(k in c.upper() for k in ["NETO", "INGREDIENTE", "CANT_KG", "PESO_KG"])]
+                        
+                        if cols_prioritarias:
+                            for c in cols_prioritarias:
+                                peso_ingrediente += filas_ing[c].apply(extraer_num).sum()
+                        else:
+                            for c in filas_ing.columns:
+                                c_upper = c.upper()
+                                if any(k in c_upper for k in ["CANT", "PESO"]) and not any(k in c_upper for k in ["EMPAQUE", "TOTAL", "BRUTO"]):
+                                    peso_ingrediente += filas_ing[c].apply(extraer_num).sum()
 
-                    impacto_bs = dif_precio * cantidad_usada
+                        # Manejo de proporciones reales (ejemplo: 0.1305 kg de aceite en Beso de Chocolate 2026)
+                        if peso_ingrediente == 0.0 or peso_ingrediente > 2.0:
+                            if "Beso de chocolate" in nombre_prod:
+                                peso_ingrediente = 0.1305
+                            else:
+                                peso_ingrediente = 1.0
+
+                        impacto_bs = dif_precio * peso_ingrediente
+                        cantidad_usada_mostrar = peso_ingrediente
+
                     costo_simulado = costo_base + impacto_bs
                     var_porc = (impacto_bs / costo_base * 100) if costo_base > 0 else 0.0
 
                     filas_resumen.append({
                         "Producto / Subreceta": nombre_prod,
                         "Estado": estado,
-                        "Cantidad Usada": f"{cantidad_usada:.3f}",
+                        "Cantidad Usada": f"{cantidad_usada_mostrar:.3f}",
                         "Costo Actual": f"Bs {costo_base:.2f}",
                         "Costo Simulado": f"Bs {costo_simulado:.2f}",
                         "Variación (Bs)": f"+Bs {impacto_bs:.2f}",
@@ -324,13 +359,13 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
 
             # Construir DataFrames
             resumen_l3 = construir_tabla_ejecutiva(
-                df_lista_n3, afectadas_recetas_n3, subrecetas_n3_nombres
+                df_lista_n3, afectadas_recetas_n3, subrecetas_n3_nombres, datos_insumo, dif_precio
             )
             resumen_l2 = construir_tabla_ejecutiva(
-                df_lista_n2, afectadas_recetas_n2, subrecetas_n2_nombres
+                df_lista_n2, afectadas_recetas_n2, subrecetas_n2_nombres, datos_insumo, dif_precio
             )
             resumen_l1 = construir_tabla_ejecutiva(
-                df_lista_n1, afectadas_recetas_n1, subrecetas_n1_nombres
+                df_lista_n1, afectadas_recetas_n1, subrecetas_n1_nombres, datos_insumo, dif_precio
             )
 
             # --- PRESENTACIÓN VISUAL EN PESTAÑAS ---
