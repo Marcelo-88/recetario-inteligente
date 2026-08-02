@@ -3,7 +3,7 @@ import pandas as pd
 import streamlit as st
 
 # ==========================================
-# 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS
+# 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS FRIDOLIN
 # ==========================================
 st.set_page_config(
     page_title="Fridolin | Centro de Control",
@@ -106,6 +106,14 @@ def normalizar_texto(val):
         return ""
     return str(val).strip()
 
+def limpiar_clave(val):
+    """Limpia códigos y nombres eliminando ceros a la izquierda, guiones y caracteres especiales para asegurar coincidencias."""
+    s = str(val).upper().strip()
+    s = re.sub(r"^\[|\]$", "", s) # Quita corchetes si existen
+    s = re.sub(r"^0+", "", s)     # Quita ceros iniciales (ej. 01-01-2003 -> 1-01-2003)
+    s = re.sub(r"[^\w\s]", "", s)  # Quita guiones o símbolos
+    return re.sub(r"\s+", " ", s).strip()
+
 def buscar_valor_columna(df_row, lista_palabras_clave):
     for col in df_row.index:
         col_upper = str(col).strip().upper()
@@ -132,7 +140,7 @@ modo_app = st.sidebar.radio(
 st.sidebar.divider()
 
 # ------------------------------------------
-# MODO 1: SIMULACIÓN FINANCIERA MULTINIVEL (VERSIÓN ORIGINAL FUNCIONAL)
+# MODO 1: SIMULACIÓN FINANCIERA MULTINIVEL (CORREGIDO Y FLEXIBLE)
 # ------------------------------------------
 if modo_app == "🍰 Simulación Financiera Multinivel":
     st.markdown("## 🍰 Simulación Financiera Proporcional")
@@ -194,7 +202,19 @@ if modo_app == "🍰 Simulación Financiera Multinivel":
                 df_recetas_n3 = cargar_pestaña("Recetas_N3")
                 df_lista_n3 = cargar_pestaña("Lista_N3")
 
-                # Mapas de acumulación
+                cod_target_clean = limpiar_clave(codigo_target)
+                nom_target_clean = limpiar_clave(articulo_mostrar)
+
+                def Coincide(cod_row, nom_row):
+                    c_clean = limpiar_clave(cod_row)
+                    n_clean = limpiar_clave(nom_row)
+                    if cod_target_clean and (cod_target_clean == c_clean or cod_target_clean in n_clean):
+                        return True
+                    if nom_target_clean and (nom_target_clean in n_clean or n_clean in nom_target_clean):
+                        return True
+                    return False
+
+                # 1. Rastrear insumo en N1
                 subrecetas_n1 = {}
                 for _, r in df_recetas_n1.iterrows():
                     padre = normalizar_texto(r.iloc[0])
@@ -202,9 +222,10 @@ if modo_app == "🍰 Simulación Financiera Multinivel":
                     cod_ins = normalizar_texto(r.iloc[2]) if len(r) > 2 else ""
                     cant = extraer_num(r.iloc[4]) if len(r) > 4 else 0.0
 
-                    if (articulo_mostrar.upper() in insumo.upper() or (codigo_target and codigo_target in cod_ins)) and padre and cant > 0:
-                        subrecetas_n1[padre.upper()] = subrecetas_n1.get(padre.upper(), 0.0) + cant
+                    if Coincide(cod_ins, insumo) and padre and cant > 0:
+                        subrecetas_n1[limpiar_clave(padre)] = subrecetas_n1.get(limpiar_clave(padre), 0.0) + cant
 
+                # 2. Rastrear insumo o N1 en N2
                 subrecetas_n2 = {}
                 for _, r in df_recetas_n2.iterrows():
                     padre = normalizar_texto(r.iloc[0])
@@ -215,13 +236,16 @@ if modo_app == "🍰 Simulación Financiera Multinivel":
                     if not padre or cant <= 0:
                         continue
 
-                    if articulo_mostrar.upper() in insumo.upper() or (codigo_target and codigo_target in cod_ins):
-                        subrecetas_n2[padre.upper()] = subrecetas_n2.get(padre.upper(), 0.0) + cant
-                    else:
-                        for n1_key, n1_cant in subrecetas_n1.items():
-                            if n1_key in insumo.upper():
-                                subrecetas_n2[padre.upper()] = subrecetas_n2.get(padre.upper(), 0.0) + (cant * n1_cant)
+                    ins_clean = limpiar_clave(insumo)
+                    padre_clean = limpiar_clave(padre)
 
+                    if Coincide(cod_ins, insumo):
+                        subrecetas_n2[padre_clean] = subrecetas_n2.get(padre_clean, 0.0) + cant
+                    elif ins_clean in subrecetas_n1:
+                        factor = subrecetas_n1[ins_clean]
+                        subrecetas_n2[padre_clean] = subrecetas_n2.get(padre_clean, 0.0) + (cant * factor)
+
+                # 3. Rastrear en N3 (Insumo directo, N1 o N2)
                 consumos_n3 = {}
                 for _, r in df_recetas_n3.iterrows():
                     padre = normalizar_texto(r.iloc[0])
@@ -232,16 +256,19 @@ if modo_app == "🍰 Simulación Financiera Multinivel":
                     if not padre or cant <= 0:
                         continue
 
-                    if articulo_mostrar.upper() in insumo.upper() or (codigo_target and codigo_target in cod_ins):
-                        consumos_n3[padre.upper()] = consumos_n3.get(padre.upper(), 0.0) + cant
-                    else:
-                        for n1_key, n1_cant in subrecetas_n1.items():
-                            if n1_key in insumo.upper():
-                                consumos_n3[padre.upper()] = consumos_n3.get(padre.upper(), 0.0) + (cant * n1_cant)
-                        for n2_key, n2_cant in subrecetas_n2.items():
-                            if n2_key in insumo.upper():
-                                consumos_n3[padre.upper()] = consumos_n3.get(padre.upper(), 0.0) + (cant * n2_cant)
+                    ins_clean = limpiar_clave(insumo)
+                    padre_clean = limpiar_clave(padre)
 
+                    if Coincide(cod_ins, insumo):
+                        consumos_n3[padre_clean] = consumos_n3.get(padre_clean, 0.0) + cant
+                    elif ins_clean in subrecetas_n1:
+                        factor = subrecetas_n1[ins_clean]
+                        consumos_n3[padre_clean] = consumos_n3.get(padre_clean, 0.0) + (cant * factor)
+                    elif ins_clean in subrecetas_n2:
+                        factor = subrecetas_n2[ins_clean]
+                        consumos_n3[padre_clean] = consumos_n3.get(padre_clean, 0.0) + (cant * factor)
+
+                # 4. Generar tabla cruzando con Lista_N3
                 filas_resultado = []
                 col_nom_l3 = df_lista_n3.columns[0]
                 col_cod_l3 = df_lista_n3.columns[1] if len(df_lista_n3.columns) > 1 else col_nom_l3
@@ -249,13 +276,10 @@ if modo_app == "🍰 Simulación Financiera Multinivel":
                 for _, r in df_lista_n3.iterrows():
                     nom_prod = normalizar_texto(r[col_nom_l3])
                     cod_prod = normalizar_texto(r[col_cod_l3])
+                    prod_clean = limpiar_clave(nom_prod)
 
-                    cant_usada = 0.0
-                    for k_prod, cant in consumos_n3.items():
-                        if k_prod in nom_prod.upper():
-                            cant_usada += cant
-
-                    if cant_usada > 0:
+                    if prod_clean in consumos_n3:
+                        cant_usada = consumos_n3[prod_clean]
                         incremento_costo = cant_usada * dif_precio_unitario
 
                         costo_orig = buscar_valor_columna(r, ["Costo Total N3", "Costo R3", "Costo Total", "Costo"])
