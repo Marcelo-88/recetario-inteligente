@@ -221,50 +221,80 @@ def obtener_precios_y_costo_n3(row_n3):
     return costo, pv1, pv2, pv3
 
 
-# 🔥 FUNCIÓN CORREGIDA PARA EXTRAER LIMPIAMENTE LOS INGREDIENTES 🔥
+# 🔥 NUEVA FUNCIÓN BLINDADA CON MÁQUINA DE ESTADOS 🔥
 def extraer_componentes_receta(fila_receta):
-    vals = [str(v).strip() for v in fila_receta.values]
+    vals = [str(v).strip() for v in fila_receta.values[1:]] # Saltamos la Col 0 (Receta Padre)
     componentes = []
-    if len(vals) <= 1:
-        return componentes
-
-    i = 1
-    while i < len(vals):
-        nom = vals[i]
+    
+    estado = "BUSCANDO_NOMBRE"
+    comp_actual = {}
+    
+    for v in vals:
+        v_upper = v.upper()
         
-        # 1. Ignorar celdas vacías o encabezados que se hayan colado en la tabla
-        if not nom or nom.upper() in ["", "-", "NAN", "NO SE ENCONTRO", "NADA", "INGREDIENTE", "INSUMO", "CANTIDAD", "UNIDAD", "KG", "LTS"]:
-            i += 1
+        # 1. Ignorar celdas vacías y basura
+        if not v or v_upper in ["", "-", "NAN", "NO SE ENCONTRO", "NADA", "INGREDIENTE", "INSUMO", "CANTIDAD", "UNIDAD", "KG", "LTS"]:
             continue
             
-        # 2. Ignorar si la celda es un valor monetario o puramente numérico (desfase)
-        if re.match(r"^BS\.?\s*\d+", nom, re.IGNORECASE) or nom.replace(".", "", 1).replace(",", "", 1).isdigit():
-            i += 1
-            continue
+        # 2. Es número?
+        es_numero = False
+        v_num = v.replace(".", "", 1).replace(",", "", 1).replace("-", "", 1)
+        if v_num.isdigit():
+            es_numero = True
             
-        # 3. Componente válido detectado
-        cant = 0.0
-        unid = "Kg/U"
+        # 3. Es código ERP? (No tiene espacios, es corto y tiene números)
+        es_codigo_erp = " " not in v_upper and len(v_upper) <= 15 and any(c.isdigit() for c in v_upper)
         
-        # Buscar cantidad en la celda adyacente (i+1)
-        if i + 1 < len(vals):
-            cant = extraer_num(vals[i + 1])
+        # 4. Es monto financiero?
+        es_moneda = bool(re.match(r"^BS\.?\s*\d+", v_upper)) or "COSTO" in v_upper
+        if es_moneda:
+            continue 
             
-        # Buscar unidad en la celda subsiguiente (i+2)
-        if i + 2 < len(vals):
-            unid_val = vals[i + 2]
-            # Solo la tomamos si no es un número (evita otro desfase)
-            if unid_val and not unid_val.replace('.', '', 1).replace(',', '', 1).isdigit() and len(unid_val) <= 12:
-                unid = unid_val
-        
-        componentes.append({
-            "componente": nom,
-            "cantidad": cant,
-            "unidad": unid
-        })
-        
-        # Avanzar estrictamente de 3 en 3 (Estructura: Insumo | Cantidad | Unidad)
-        i += 3
+        # --- MOTOR DE ESTADOS ---
+        if estado == "BUSCANDO_NOMBRE":
+            if not es_numero:
+                comp_actual = {"componente": v, "cantidad": 0.0, "unidad": "Kg/U"}
+                estado = "BUSCANDO_CANTIDAD"
+                
+        elif estado == "BUSCANDO_CANTIDAD":
+            if es_numero:
+                comp_actual["cantidad"] = extraer_num(v)
+                estado = "BUSCANDO_UNIDAD"
+            else:
+                comp_upper = comp_actual.get("componente", "").upper()
+                es_comp_previo_codigo = " " not in comp_upper and len(comp_upper) <= 15 and any(c.isdigit() for c in comp_upper)
+                
+                # Si leímos un código (Ej: 1-86-00003) y ahora leemos texto (Dulce de Leche), corregimos el nombre
+                if es_comp_previo_codigo and not es_codigo_erp:
+                    comp_actual["componente"] = v
+                else:
+                    # El anterior no tenía cantidad, lo cerramos e iniciamos uno nuevo
+                    componentes.append(comp_actual)
+                    comp_actual = {"componente": v, "cantidad": 0.0, "unidad": "Kg/U"}
+                    
+        elif estado == "BUSCANDO_UNIDAD":
+            if es_numero:
+                componentes.append(comp_actual)
+                comp_actual = {}
+                estado = "BUSCANDO_NOMBRE"
+            elif es_codigo_erp:
+                # Nos chocamos con el código del SIGUIENTE componente
+                componentes.append(comp_actual)
+                comp_actual = {"componente": v, "cantidad": 0.0, "unidad": "Kg/U"}
+                estado = "BUSCANDO_CANTIDAD"
+            else:
+                if len(v) <= 15: # Si es corto es unidad
+                    comp_actual["unidad"] = v
+                    componentes.append(comp_actual)
+                    comp_actual = {}
+                    estado = "BUSCANDO_NOMBRE"
+                else: # Si es largo, es el nombre del siguiente
+                    componentes.append(comp_actual)
+                    comp_actual = {"componente": v, "cantidad": 0.0, "unidad": "Kg/U"}
+                    estado = "BUSCANDO_CANTIDAD"
+                    
+    if comp_actual and "componente" in comp_actual:
+        componentes.append(comp_actual)
         
     return componentes
 
@@ -409,14 +439,13 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
                     st.markdown("##### 🔴 Recetas N1 (Sub-Recetas Base)")
                     for nom_n1, cant_n1, unid_n1, fila_n1 in recetas_n1_list:
                         cod_n1 = normalizar_cod(nom_n1)
-                        # Formato limpio para que no queden números sueltos en el título
                         with st.expander(f"🔴 **[{cod_n1}] {nom_n1}** — {cant_n1:.4f} {unid_n1}"):
                             st.caption("Composición interna de esta Sub-Receta N1:")
                             sub_comps = extraer_componentes_receta(fila_n1)
                             if sub_comps:
                                 df_sub = pd.DataFrame(sub_comps)
                                 df_sub.columns = ["Componente / Insumo", "Cantidad", "Unidad"]
-                                df_sub["Cantidad"] = df_sub["Cantidad"].apply(lambda x: f"{x:.4f}")
+                                df_sub["Cantidad"] = df_sub["Cantidad"].apply(lambda x: f"{float(x):.4f}")
                                 st.dataframe(df_sub, use_container_width=True, hide_index=True)
                             else:
                                 st.write("Sin detalle registrado.")
@@ -442,14 +471,14 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
                                     ]
 
                                     if not match_inner_n1.empty:
-                                        with st.expander(f"🔴 **[N1 interna] [{s_norm}] {s_nom}** — {s_cant:.4f} {s_unid}"):
+                                        with st.expander(f"🔴 **[N1 interna] [{s_norm}] {s_nom}** — {float(s_cant):.4f} {s_unid}"):
                                             inner_comps = extraer_componentes_receta(match_inner_n1.iloc[0])
                                             df_inner = pd.DataFrame(inner_comps)
                                             df_inner.columns = ["Componente / Insumo", "Cantidad", "Unidad"]
-                                            df_inner["Cantidad"] = df_inner["Cantidad"].apply(lambda x: f"{x:.4f}")
+                                            df_inner["Cantidad"] = df_inner["Cantidad"].apply(lambda x: f"{float(x):.4f}")
                                             st.dataframe(df_inner, use_container_width=True, hide_index=True)
                                     else:
-                                        st.markdown(f"• **[{s_norm}] {s_nom}** — {s_cant:.4f} {s_unid}")
+                                        st.markdown(f"• **[{s_norm}] {s_nom}** — {float(s_cant):.4f} {s_unid}")
                             else:
                                 st.write("Sin detalle registrado.")
 
