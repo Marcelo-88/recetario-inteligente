@@ -126,6 +126,7 @@ modo_app = st.sidebar.radio(
     "Selecciona la función:",
     [
         "📋 Ficha Técnica de Producto (N3)",
+        "📊 Control de Márgenes y Estados (N3)",
         "🍰 Simulación Financiera Multinivel",
         "📖 Explorador de Tablas",
     ],
@@ -143,7 +144,6 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
         df_recetas_n3 = cargar_pestaña("Recetas_N3")
         df_lista_n3 = cargar_pestaña("Lista_N3")
 
-        # Mapeo flexible de la primera y segunda columna de Lista_N3 (Nombre y Código ERP)
         col_nom_l3 = df_lista_n3.columns[0]
         col_cod_l3 = df_lista_n3.columns[1] if len(df_lista_n3.columns) > 1 else col_nom_l3
 
@@ -159,7 +159,6 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
             nombre_producto = normalizar_texto(fila_master[col_nom_l3])
             codigo_producto = normalizar_texto(fila_master[col_cod_l3])
 
-            # --- LECTURA DINÁMICA DE FINANZAS ---
             costo_r3 = buscar_valor_columna(fila_master, ["Costo Total N3", "Costo R3", "Costo Total", "Costo"])
             pv1 = buscar_valor_columna(fila_master, ["Precio Venta 1", "PV1", "Precio 1"])
             pv2 = buscar_valor_columna(fila_master, ["Precio Venta 2", "PV2", "Precio 2"])
@@ -177,21 +176,21 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
 
             with m2:
                 if pv1 > 0:
-                    margen1 = ((pv1 - costo_r3) / pv1 * 100) if pv1 > 0 else 0
+                    margen1 = ((pv1 - costo_r3) / pv1 * 100)
                     st.metric("Precio Venta 1", f"Bs {pv1:.2f}", delta=f"{margen1:.1f}% Margen")
                 else:
                     st.metric("Precio Venta 1", "No Aplica")
 
             with m3:
                 if pv2 > 0:
-                    margen2 = ((pv2 - costo_r3) / pv2 * 100) if pv2 > 0 else 0
+                    margen2 = ((pv2 - costo_r3) / pv2 * 100)
                     st.metric("Precio Venta 2", f"Bs {pv2:.2f}", delta=f"{margen2:.1f}% Margen")
                 else:
                     st.metric("Precio Venta 2", "No Aplica")
 
             with m4:
                 if pv3 > 0:
-                    margen3 = ((pv3 - costo_r3) / pv3 * 100) if pv3 > 0 else 0
+                    margen3 = ((pv3 - costo_r3) / pv3 * 100)
                     st.metric("Precio Venta 3", f"Bs {pv3:.2f}", delta=f"{margen3:.1f}% Margen")
                 else:
                     st.metric("Precio Venta 3", "No Aplica")
@@ -208,7 +207,7 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
                 sub_df = df_recetas_n3[df_recetas_n3.iloc[:, 2].astype(str).str.strip().str.upper() == codigo_producto.upper()]
 
             if not sub_df.empty:
-                # 1. MATERIA PRIMA DIRECTA (Cols B a E)
+                # 1. MATERIA PRIMA DIRECTA
                 mp_rows = []
                 for _, row in sub_df.iterrows():
                     nom_mp = normalizar_texto(row.iloc[1])
@@ -228,7 +227,7 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
 
                 df_mp_final = pd.DataFrame(mp_rows).drop_duplicates()
 
-                # 2. RECETAS N1 (Cols G a J)
+                # 2. RECETAS N1
                 n1_rows = []
                 for _, row in sub_df.iterrows():
                     if len(row) > 9:
@@ -247,7 +246,7 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
 
                 df_n1_final = pd.DataFrame(n1_rows).drop_duplicates()
 
-                # 3. RECETAS N2 (Cols K a N)
+                # 3. RECETAS N2
                 n2_rows = []
                 for _, row in sub_df.iterrows():
                     if len(row) > 13:
@@ -292,7 +291,130 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
         st.error(f"Error al procesar la Ficha Técnica: {e}")
 
 # ------------------------------------------
-# MODO 2: SIMULACIÓN FINANCIERA MULTINIVEL
+# MODO 2: CONTROL DE MÁRGENES Y ESTADOS (N3)
+# ------------------------------------------
+elif modo_app == "📊 Control de Márgenes y Estados (N3)":
+    st.markdown("## 📊 Tablero de Control de Márgenes por Estado")
+    st.caption("Visualiza de forma rápida qué productos están dentro o fuera del objetivo de rentabilidad.")
+
+    try:
+        df_lista_n3 = cargar_pestaña("Lista_N3")
+
+        # Intentar detectar la columna Estado
+        col_estado = None
+        for col in df_lista_n3.columns:
+            if "ESTADO" in str(col).upper() or "STATUS" in str(col).upper():
+                col_estado = col
+                break
+
+        # Si no hay columna Estado explícita, usamos la última o la creamos
+        if not col_estado:
+            col_estado = df_lista_n3.columns[-1]
+
+        # Obtener valores únicos de Estado
+        estados_disponibles = sorted([str(e).strip() for e in df_lista_n3[col_estado].unique() if str(e).strip()])
+        
+        # Filtros superiores
+        f1, f2 = st.columns([1, 2])
+        with f1:
+            estado_sel = st.multiselect("📌 Filtrar por Estado:", estados_disponibles, default=estados_disponibles)
+        with f2:
+            busqueda_prod = st.text_input("🔍 Buscar por Nombre o Código:")
+
+        # Procesar filas para calcular métricas de la tabla
+        datos_procesados = []
+        for _, row in df_lista_n3.iterrows():
+            est_val = str(row[col_estado]).strip()
+            
+            # Aplicar filtro de estado
+            if estado_sel and est_val not in estado_sel:
+                continue
+
+            nombre = normalizar_texto(row.iloc[0])
+            codigo = normalizar_texto(row.iloc[1]) if len(row) > 1 else "-"
+            
+            # Aplicar filtro de texto
+            if busqueda_prod:
+                if busqueda_prod.lower() not in nombre.lower() and busqueda_prod.lower() not in codigo.lower():
+                    continue
+
+            costo = buscar_valor_columna(row, ["Costo Total N3", "Costo R3", "Costo Total", "Costo"])
+            pv1 = buscar_valor_columna(row, ["Precio Venta 1", "PV1", "Precio 1"])
+            pv2 = buscar_valor_columna(row, ["Precio Venta 2", "PV2", "Precio 2"])
+
+            margen1 = ((pv1 - costo) / pv1 * 100) if pv1 > 0 else 0.0
+            margen2 = ((pv2 - costo) / pv2 * 100) if pv2 > 0 else 0.0
+
+            datos_procesados.append({
+                "Código ERP": codigo,
+                "Producto Terminado": nombre,
+                "Estado": est_val if est_val else "Sin Estado",
+                "Costo R3 (Bs)": costo,
+                "Precio Venta 1 (Bs)": pv1,
+                "% Margen PV1": margen1,
+                "Precio Venta 2 (Bs)": pv2,
+                "% Margen PV2": margen2,
+            })
+
+        df_tabla_margenes = pd.DataFrame(datos_procesados)
+
+        if not df_tabla_margenes.empty:
+            st.markdown(f"**Mostrando `{len(df_tabla_margenes)}` productos**")
+
+            # --- LÓGICA DE COLORES SEGÚN REGLAS DE NEGOCIO ---
+            def colorear_pv1(val):
+                if val <= 0:
+                    return ""
+                if val >= 60.0:
+                    return "background-color: #D4EDDA; color: #155724; font-weight: bold;"  # Verde
+                elif 55.0 <= val <= 59.99:
+                    return "background-color: #FFF3CD; color: #856404; font-weight: bold;"  # Amarillo
+                else:
+                    return "background-color: #F8D7DA; color: #721C24; font-weight: bold;"  # Rojo
+
+            def colorear_pv2(val):
+                if val <= 0:
+                    return ""
+                if val > 55.0:
+                    return "background-color: #D4EDDA; color: #155724; font-weight: bold;"  # Verde
+                elif 46.0 <= val <= 54.99:
+                    return "background-color: #FFF3CD; color: #856404; font-weight: bold;"  # Amarillo
+                else:
+                    return "background-color: #F8D7DA; color: #721C24; font-weight: bold;"  # Rojo
+
+            # Aplicar estilos
+            tabla_estilizada = (
+                df_tabla_margenes.style
+                .applymap(colorear_pv1, subset=["% Margen PV1"])
+                .applymap(colorear_pv2, subset=["% Margen PV2"])
+                .format({
+                    "Costo R3 (Bs)": "{:.2f} Bs",
+                    "Precio Venta 1 (Bs)": "{:.2f} Bs",
+                    "% Margen PV1": "{:.1f}%",
+                    "Precio Venta 2 (Bs)": "{:.2f} Bs",
+                    "% Margen PV2": "{:.1f}%",
+                })
+            )
+
+            # Leyenda de colores explicativa
+            st.markdown("""
+                <div style="display:flex; gap:15px; margin-bottom:10px; font-size:0.85rem;">
+                    <span><b>Leyenda PV1:</b> 🟢 $\ge$ 60% | 🟡 55% - 59% | 🔴 < 55%</span>
+                    <span>|</span>
+                    <span><b>Leyenda PV2:</b> 🟢 > 55% | 🟡 46% - 54% | 🔴 < 45%</span>
+                </div>
+            """, unsafe_allow_html=True)
+
+            st.dataframe(tabla_estilizada, use_container_width=True, height=550)
+
+        else:
+            st.warning("No se encontraron productos que coincidan con los filtros seleccionados.")
+
+    except Exception as e:
+        st.error(f"Error al cargar el Control de Márgenes: {e}")
+
+# ------------------------------------------
+# MODO 3: SIMULACIÓN FINANCIERA MULTINIVEL
 # ------------------------------------------
 elif modo_app == "🍰 Simulación Financiera Multinivel":
     st.markdown("## 🍰 Simulación Financiera Proporcional")
@@ -340,7 +462,7 @@ elif modo_app == "🍰 Simulación Financiera Multinivel":
         st.error(f"Error en la pantalla de simulación: {e}")
 
 # ------------------------------------------
-# MODO 3: EXPLORADOR DE TABLAS
+# MODO 4: EXPLORADOR DE TABLAS
 # ------------------------------------------
 elif modo_app == "📖 Explorador de Tablas":
     st.sidebar.header("📋 Pestañas del Recetario")
