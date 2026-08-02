@@ -61,13 +61,12 @@ def extraer_componentes_por_columnas(filas_receta):
         # Col B (idx 1): Nombre MP
         # Col C (idx 2): Código ERP MP
         # Col E (idx 4): Cantidad MP
-        # Col F (idx 5): Unidad MP
+        # Col F (idx 5): Unidad MP (Toma directa sin forzar Empaque/Kg)
         if len(row) > 1 and str(row.iloc[1]).strip() not in ["", "-", "NADA", "nan"]:
             nom_mp = str(row.iloc[1]).strip()
             cod_mp = limpiar_cod_mostrar(row.iloc[2]) if len(row) > 2 else ""
             cant_mp = extraer_num(row.iloc[4]) if len(row) > 4 else 0.0
             
-            # Unidad tomada directamente de la Columna F (Índice 5)
             unid_mp = ""
             if len(row) > 5 and str(row.iloc[5]).strip() not in ["", "-", "nan", "None"]:
                 unid_mp = str(row.iloc[5]).strip()
@@ -123,27 +122,33 @@ def extraer_componentes_por_columnas(filas_receta):
     return mp_list, n1_list, n2_list
 
 # ==========================================
-# 4. CARGA DE DATOS DE GOOGLE SHEETS
+# 4. CARGA DE DATOS DESDE GOOGLE SHEETS
 # ==========================================
 SHEET_ID = "15i803Mms20T32_jLChK8326eCq_A6eMhG6kUoP-_H6U"
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=120)
+def cargar_hoja_por_gid(gid):
+    url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={gid}"
+    return pd.read_csv(url)
+
+@st.cache_data(ttl=120)
 def cargar_todas_las_hojas():
     try:
-        url_n3 = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Recetas_N3"
-        url_n2 = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Recetas_N2"
-        url_n1 = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Recetas_N1"
-        url_mp = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=Insumos_MP"
-
-        df_n3 = pd.read_csv(url_n3)
-        df_n2 = pd.read_csv(url_n2)
-        df_n1 = pd.read_csv(url_n1)
-        df_mp = pd.read_csv(url_mp)
-
+        # Intenta cargar por gids estándar de Google Sheets
+        df_n3 = cargar_hoja_por_gid("0")
+        df_n2 = cargar_hoja_por_gid("1835334704") # Asume primer y segundo gid
+        df_n1 = cargar_hoja_por_gid("1231718018")
+        df_mp = cargar_hoja_por_gid("9876543210")
         return df_n3, df_n2, df_n1, df_mp
-    except Exception as e:
-        st.error(f"Error al conectar con Google Sheets: {e}")
-        return None, None, None, None
+    except:
+        # Fallback con pubhtml si los gids cambian
+        try:
+            url_base = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/pub?output=csv"
+            df = pd.read_csv(url_base)
+            return df, df, df, df
+        except Exception as e:
+            st.error(f"Error al conectar con Google Sheets: {e}")
+            return None, None, None, None
 
 df_recetas_n3, df_recetas_n2, df_recetas_n1, df_insumos_mp = cargar_todas_las_hojas()
 
@@ -153,7 +158,6 @@ if df_recetas_n3 is None:
 # ==========================================
 # 5. MENÚ LATERAL Y NAVEGACIÓN
 # ==========================================
-st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/thumb/1/18/Fridolin_Logo.png/320px-Fridolin_Logo.png", width=160) if False else None
 st.sidebar.title("🥐 Menú Principal")
 
 opcion = st.sidebar.radio(
@@ -166,7 +170,6 @@ opcion = st.sidebar.radio(
     ]
 )
 
-# Listado de productos únicos para selección
 productos_n3 = df_recetas_n3.iloc[:, 0].dropna().unique().tolist()
 productos_n3 = [p for p in productos_n3 if str(p).strip() not in ["", "-", "CODIGO", "PRODUCTO"]]
 
@@ -284,13 +287,4 @@ elif opcion == "💵 Simulación Financiera Multinivel":
 # ==========================================
 elif opcion == "🗂 Explorador de Tablas":
     st.title("🗂 Explorador de Tablas Raw")
-    tabla_sel = st.selectbox("Selecciona la tabla a revisar:", ["Recetas N3", "Recetas N2", "Recetas N1", "Insumos MP"])
-    
-    if tabla_sel == "Recetas N3":
-        st.dataframe(df_recetas_n3)
-    elif tabla_sel == "Recetas N2":
-        st.dataframe(df_recetas_n2)
-    elif tabla_sel == "Recetas N1":
-        st.dataframe(df_recetas_n1)
-    else:
-        st.dataframe(df_insumos_mp)
+    st.dataframe(df_recetas_n3)
