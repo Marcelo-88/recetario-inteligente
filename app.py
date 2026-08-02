@@ -11,12 +11,20 @@ st.set_page_config(
 
 st.title("🍰 Recetario Inteligente y Simulación de Costos")
 
+# --- CONEXIÓN DIRECTA A GOOGLE SHEETS (DRIVE) ---
+SHEET_ID = "1Y8Dzxl_1jVCUrceAQVfSc94RNugo2cgRsrHJwXLwmU4"
+
+# URLs de exportación CSV para cada pestaña por su GID
+URL_LISTA_N3 = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=563862181"
+URL_RECETAS_N3 = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=1120286801"
+URL_MERMAS = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=0"
+
 # --- FUNCIONES DE CÁLCULO ---
 
 def calcular_pesos_totales_n3(df_recetas_n3):
     """
     Suma dinámicamente el peso de todos los INGREDIENTES comestibles por producto,
-    ignorando por completo los 'Empaque' / Packaging.
+    ignorando los ítems categorizados como 'Empaque'.
     """
     if df_recetas_n3.empty:
         return {}
@@ -124,19 +132,19 @@ def construir_tabla_ejecutiva(df_lista3, df_recetas_n3, elemento_afectado, incre
     return res_df
 
 
-# --- CARGA DE DATOS ---
-@st.cache_data
-def cargar_datos():
+# --- CARGA DE DATOS DESDE GOOGLE DRIVE ---
+@st.cache_data(ttl=60)
+def cargar_datos_drive():
     try:
-        df_l3 = pd.read_csv("Recetario_Automatizado_Lista_N3.csv")
-        df_r3 = pd.read_csv("Recetario_Automatizado_Recetas_N3.csv")
-        df_mermas = pd.read_csv("Recetario_Automatizado_Mermas_Costos.csv")
+        df_l3 = pd.read_csv(URL_LISTA_N3)
+        df_r3 = pd.read_csv(URL_RECETAS_N3)
+        df_mermas = pd.read_csv(URL_MERMAS)
         return df_l3, df_r3, df_mermas
     except Exception as e:
-        st.error(f"Error al cargar los archivos CSV: {e}")
+        st.error(f"⚠️ Error al conectar con Google Drive: {e}")
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-df_l3, df_r3, df_mermas = cargar_datos()
+df_l3, df_r3, df_mermas = cargar_datos_drive()
 
 # --- INTERFAZ USUARIO ---
 if not df_mermas.empty and not df_l3.empty:
