@@ -9,7 +9,7 @@ st.set_page_config(
 )
 
 st.title("🍳 Recetario Inteligente & Centro de Control")
-st.caption("Simulación Financiera Multinivel - Lectura de 'Costo c/rendimiento' (Columna H)")
+st.caption("Simulación Financiera Multinivel - Impacto Proporcional por Porción")
 st.divider()
 
 ID_HOJA = "1Y8Dzxl_1jVCUrceAQVfSc94RNugo2cgRsrHJwXLwmU4"
@@ -19,7 +19,6 @@ ID_HOJA = "1Y8Dzxl_1jVCUrceAQVfSc94RNugo2cgRsrHJwXLwmU4"
 def cargar_pestaña(nombre_pestaña):
     url = f"https://docs.google.com/spreadsheets/d/{ID_HOJA}/gviz/tq?tqx=out:csv&sheet={nombre_pestaña}"
     df = pd.read_csv(url, dtype=str)
-    # Limpiamos nombres de columnas quitando espacios duplicados o saltos de línea
     df.columns = [re.sub(r"\s+", " ", str(c)).strip() for c in df.columns]
     return df.fillna("")
 
@@ -53,26 +52,22 @@ def extraer_num(val):
 
 
 def buscar_columna_mermas(df_mermas):
-    """Busca la columna 'Costo c/rendimiento' (Columna H) sin depender de índices fijos."""
     patrones = ["COSTO C/RENDIMIENTO", "COSTO C/ RENDIMIENTO", "RENDIMIENTO"]
     for col in df_mermas.columns:
         col_clean = str(col).strip().upper()
         for pat in patrones:
             if pat in col_clean:
                 return col
-    # Si no la encuentra por nombre, toma la columna H (Índice 7)
     if len(df_mermas.columns) >= 8:
         return df_mermas.columns[7]
     return df_mermas.columns[-1]
 
 
 def buscar_columna_costo_master(df, nivel="3"):
-    """Busca Costo R3, R2 o R1 en las listas máster."""
     patron = f"COSTO R{nivel}"
     for col in df.columns:
         if patron in str(col).strip().upper():
             return col
-    # Respaldo en caso de variaciones de nombre
     for col in df.columns:
         c_u = str(col).upper()
         if "COSTO" in c_u and "PRECIO" not in c_u:
@@ -128,8 +123,8 @@ if modo_app == "📋 Explorador de Tablas":
         st.error(f"Error al cargar {pestaña_activa}: {e}")
 
 elif modo_app == "💥 Simulación Financiera Multinivel":
-    st.header("💥 Simulación Financiera Multinivel")
-    st.info("Cálculo basado en 'Costo c/rendimiento' (Mermas_Costos) y 'Costo R3' (Lista_N3)")
+    st.header("💥 Simulación Financiera Multinivel Proporcional")
+    st.info("Ajuste de cálculo de variación por cantidad consumida exacta (centavos)")
 
     try:
         df_mermas = cargar_pestaña("Mermas_Costos")
@@ -182,10 +177,10 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 st.caption(articulo_mostrar)
             with c2:
                 nuevo_precio = st.number_input(
-                    "Nuevo precio simulado (Bs):",
+                    "Nuevo precio simulado por Unidad/Medida (Bs):",
                     min_value=0.0,
-                    value=float(costo_actual * 1.20) if costo_actual > 0 else 25.0,
-                    step=0.50,
+                    value=float(costo_actual + 1.00) if costo_actual > 0 else 20.0,
+                    step=0.10,
                 )
             with c3:
                 dif_precio = nuevo_precio - costo_actual
@@ -193,15 +188,14 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                     (dif_precio / costo_actual * 100) if costo_actual > 0 else 0.0
                 )
                 st.metric(
-                    "Incremento Unitario Insumo",
+                    "Variación Unitaria Directa",
                     f"+Bs {dif_precio:.2f}",
                     delta=f"{porc_inc:.1f}%",
                 )
 
-            st.caption(f"📌 Columna de costo leída en Mermas_Costos: **'{col_costo_m}'** (Valor base: Bs {costo_actual:.2f})")
+            st.caption(f"📌 Valor base en Mermas_Costos: **Bs {costo_actual:.2f}**")
             st.divider()
 
-            # Helpers de consulta
             def consultar_master_gen(df_lista, busqueda_str, nivel="3"):
                 col_nom = df_lista.columns[0]
                 col_cod = df_lista.columns[1] if len(df_lista.columns) > 1 else col_nom
@@ -222,7 +216,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                     return c_base, c_show, n_show
                 return 0.0, "-", str(busqueda_str).strip()
 
-            # --- RECETAS N1 ---
+            # --- RECETAS N1 (Cálculo exacto por cantidad de MP consumida) ---
             impactos_n1 = {}
             for _, row in df_recetas_n1.iterrows():
                 vals = [str(v).strip() for v in row.values]
@@ -235,13 +229,16 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 row_norms = [normalizar_cod(v) for v in vals]
                 if codigo_target_norm in row_norms[1:]:
                     idx = row_norms[1:].index(codigo_target_norm) + 1
+                    # Extraer la cantidad utilizada (Columna Cantidad MP en Receta)
                     cant = 0.0
-                    for k in range(idx + 1, min(idx + 4, len(vals))):
+                    for k in range(idx + 1, len(vals)):
                         num = extraer_num(vals[k])
                         if num > 0:
                             cant = num
                             break
-                    inc = (cant if cant > 0 else 1.0) * dif_precio
+                    
+                    # Variación = Cantidad consumida * Variación Unitaria del Insumo
+                    inc = cant * dif_precio
                     impactos_n1[receta_padre_norm] = (
                         impactos_n1.get(receta_padre_norm, 0.0) + inc
                     )
@@ -274,26 +271,28 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 row_norms = [normalizar_cod(v) for v in vals]
                 inc_fila = 0.0
 
+                # MP directa en N2
                 if codigo_target_norm in row_norms[1:]:
                     idx = row_norms[1:].index(codigo_target_norm) + 1
                     cant = 0.0
-                    for k in range(idx + 1, min(idx + 4, len(vals))):
+                    for k in range(idx + 1, len(vals)):
                         num = extraer_num(vals[k])
                         if num > 0:
                             cant = num
                             break
-                    inc_fila += (cant if cant > 0 else 1.0) * dif_precio
+                    inc_fila += cant * dif_precio
 
+                # N1 consumido en N2
                 for cod_n1_norm, inc_n1 in impactos_n1.items():
                     if cod_n1_norm in row_norms[1:]:
                         idx = row_norms[1:].index(cod_n1_norm) + 1
                         cant = 0.0
-                        for k in range(idx + 1, min(idx + 4, len(vals))):
+                        for k in range(idx + 1, len(vals)):
                             num = extraer_num(vals[k])
                             if num > 0:
                                 cant = num
                                 break
-                        inc_fila += (cant if cant > 0 else 1.0) * inc_n1
+                        inc_fila += cant * inc_n1
 
                 if inc_fila > 0:
                     impactos_n2[receta_padre_norm] = (
@@ -315,7 +314,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                     "Variación (%)": f"+{porc_var:.1f}%",
                 })
 
-            # --- RECETAS N3 ---
+            # --- RECETAS N3 (Productos Finales por Unidad) ---
             impactos_n3 = {}
             for _, row in df_recetas_n3.iterrows():
                 vals = [str(v).strip() for v in row.values]
@@ -326,40 +325,40 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
 
                 inc_fila = 0.0
 
-                # MP Directa
+                # MP directa en N3
                 if codigo_target_norm in row_norms[1:]:
                     idx = row_norms[1:].index(codigo_target_norm) + 1
                     cant = 0.0
-                    for k in range(idx + 1, min(idx + 4, len(vals))):
+                    for k in range(idx + 1, len(vals)):
                         num = extraer_num(vals[k])
                         if num > 0:
                             cant = num
                             break
-                    inc_fila += (cant if cant > 0 else 1.0) * dif_precio
+                    inc_fila += cant * dif_precio
 
-                # N1 en N3
+                # N1 consumido en N3
                 for cod_n1_norm, inc_n1 in impactos_n1.items():
                     if cod_n1_norm in row_norms[1:]:
                         idx = row_norms[1:].index(cod_n1_norm) + 1
                         cant = 0.0
-                        for k in range(idx + 1, min(idx + 4, len(vals))):
+                        for k in range(idx + 1, len(vals)):
                             num = extraer_num(vals[k])
                             if num > 0:
                                 cant = num
                                 break
-                        inc_fila += (cant if cant > 0 else 1.0) * inc_n1
+                        inc_fila += cant * inc_n1
 
-                # N2 en N3
+                # N2 consumido en N3
                 for cod_n2_norm, inc_n2 in impactos_n2.items():
                     if cod_n2_norm in row_norms[1:]:
                         idx = row_norms[1:].index(cod_n2_norm) + 1
                         cant = 0.0
-                        for k in range(idx + 1, min(idx + 4, len(vals))):
+                        for k in range(idx + 1, len(vals)):
                             num = extraer_num(vals[k])
                             if num > 0:
                                 cant = num
                                 break
-                        inc_fila += (cant if cant > 0 else 1.0) * inc_n2
+                        inc_fila += cant * inc_n2
 
                 if inc_fila > 0:
                     impactos_n3[nombre_o_cod_n3] = (
@@ -368,9 +367,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
 
             filas_n3 = []
             for nom_o_cod, inc_total in impactos_n3.items():
-                costo_base, cod_show, nom_show = consultar_master_gen(
-                    df_lista_n3, nom_o_cod, "3"
-                )
+                costo_base, cod_show, nom_show = consultar_master_n3 if 'consultar_master_n3' in locals() else consultar_master_gen(df_lista_n3, nom_o_cod, "3")
                 porc_var = (inc_total / costo_base * 100) if costo_base > 0 else 0.0
 
                 filas_n3.append({
@@ -387,7 +384,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
             resumen_l3 = pd.DataFrame(filas_n3)
 
             st.subheader(
-                f"📊 Resultados de Simulación para Insumo: [{codigo_target_raw}] - {articulo_mostrar}"
+                f"📊 Resultados Ajustados para Insumo: [{codigo_target_raw}] - {articulo_mostrar}"
             )
 
             t3, t2, t1 = st.tabs(
