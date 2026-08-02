@@ -1,3 +1,4 @@
+import re
 import pandas as pd
 import streamlit as st
 
@@ -19,7 +20,7 @@ def cargar_pestaña(nombre_pestaña):
     url = f"https://docs.google.com/spreadsheets/d/{ID_HOJA}/gviz/tq?tqx=out:csv&sheet={nombre_pestaña}"
     df = pd.read_csv(url)
     df.columns = df.columns.str.strip()
-    return df
+    return df.fillna("")
 
 
 # 1. Menú Principal
@@ -80,7 +81,7 @@ if modo_app == "📋 Explorador de Tablas":
 elif modo_app == "💥 Simulación Financiera Multinivel":
     st.header("💥 Simulación de Impacto en Costos (Vista Ejecutiva)")
     st.info(
-        "Visualiza de manera limpia el Costo Actual vs. Costo Simulado y su variación proporcional real en Productos Finales e Intermedios."
+        "Visualiza el Costo Actual vs. Costo Simulado y su variación proporcional real en Productos Finales e Intermedios."
     )
 
     try:
@@ -99,16 +100,16 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
         col_articulo = df_mermas.columns[2]
 
         df_mermas["COMBO_MOSTRAR"] = (
-            df_mermas[col_codigo].astype(str)
+            df_mermas[col_codigo].astype(str).str.strip()
             + " | "
-            + df_mermas[col_articulo].astype(str)
+            + df_mermas[col_articulo].astype(str).str.strip()
             + " ("
-            + df_mermas[col_recetario].astype(str)
+            + df_mermas[col_recetario].astype(str).str.strip()
             + ")"
         )
 
         lista_opciones = sorted(
-            df_mermas["COMBO_MOSTRAR"].dropna().unique().tolist()
+            [x for x in df_mermas["COMBO_MOSTRAR"].dropna().unique() if len(str(x).strip()) > 5]
         )
 
         st.subheader("1️⃣ Selecciona la Materia Prima / Empaque")
@@ -130,12 +131,8 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
             for col in df_mermas.columns:
                 if "COSTO" in col.upper() or "PRECIO" in col.upper():
                     try:
-                        val = float(
-                            str(datos_insumo[col])
-                            .replace("Bs", "")
-                            .replace(",", ".")
-                            .strip()
-                        )
+                        val_str = str(datos_insumo[col]).replace("Bs", "").replace("$", "").replace(",", ".").strip()
+                        val = float(val_str)
                         if val > 0:
                             costo_actual = val
                             break
@@ -165,36 +162,46 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
 
             st.divider()
 
-            # --- FUNCIONES AUXILIARES DE LIMPIEZA Y CÁLCULO ---
+            # --- FUNCIONES AUXILIARES DE SEGURIDAD Y CONVERSIÓN ---
             def extraer_num(val):
+                if pd.isna(val) or val == "":
+                    return 0.0
                 try:
-                    if pd.isna(val):
-                        return 0.0
-                    return float(
-                        str(val)
-                        .replace("Bs", "")
-                        .replace(",", ".")
-                        .strip()
-                    )
+                    cleaned = re.sub(r"[^\d.,-]", "", str(val)).replace(",", ".")
+                    return float(cleaned) if cleaned else 0.0
                 except:
                     return 0.0
 
             def obtener_columna_cantidad(df_receta):
                 for col in df_receta.columns:
                     c_up = col.upper()
-                    if any(k in c_up for k in ["CANT", "PESO", "NETO", "BRUTO", "KG", "GR"]) and not any(k in c_up for k in ["COSTO", "PRECIO", "TOTAL", "IMPORTE"]):
+                    if any(k in c_up for k in ["CANT", "PESO", "NETO", "BRUTO", "KG", "GR"]) and not any(k in c_up for k in ["COSTO", "PRECIO", "TOTAL", "IMPORTE", "UNIDAD", "MEDIDA"]):
                         return col
                 return df_receta.columns[2] if len(df_receta.columns) > 2 else df_receta.columns[-1]
 
-            def verificar_ingrediente(row_str, busquedas):
-                row_clean = str(row_str).lower()
-                for b in busquedas:
-                    b_clean = str(b).strip().lower()
-                    if len(b_clean) > 2 and b_clean in row_clean:
+            def construir_texto_fila(row):
+                # Convierte de forma segura toda la fila a string unificado sin causar error float
+                elementos = [str(val).strip() for val in row.values if pd.notna(val) and str(val).strip() != ""]
+                return " ".join(elementos)
+
+            def verificar_coincidencia_exacta(texto_fila, codigo_erp, nombres_busqueda):
+                texto_clean = texto_fila.lower()
+                
+                # 1. Búsqueda por código ERP exacto (máxima precisión)
+                if codigo_erp and len(codigo_erp) > 2:
+                    if re.search(rf"\b{re.escape(codigo_erp.lower())}\b", texto_clean):
                         return True
+
+                # 2. Búsqueda por nombres (solo cadenas significativas de más de 3 caracteres)
+                for nombre in nombres_busqueda:
+                    n_clean = str(nombre).strip().lower()
+                    if len(n_clean) > 3:
+                        # Evitamos falsos positivos verificando que coincida la palabra completa
+                        if re.search(rf"\b{re.escape(n_clean)}\b", texto_clean):
+                            return True
                 return False
 
-            claves_insumo = [codigo_val, recetario_val, articulo_val]
+            claves_directas = [recetario_val, articulo_val]
 
             # --- RASTREO Y CÁLCULO EN NIVEL 1 (Subrecetas Base) ---
             col_cant_n1 = obtener_columna_cantidad(df_recetas_n1)
@@ -204,33 +211,36 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
             filas_resumen_n1 = []
 
             for nombre_receta, df_ing in df_recetas_n1.groupby(col_prod_n1):
+                if not str(nombre_receta).strip():
+                    continue
+                
                 inc_receta = 0.0
                 cant_total_insumo = 0.0
                 es_afectado = False
 
                 for _, ing in df_ing.iterrows():
-                    ing_texto = " ".join(ing.astype(str))
-                    if verificar_ingrediente(ing_texto, claves_insumo):
+                    ing_texto = construir_texto_fila(ing)
+                    if verificar_coincidencia_exacta(ing_texto, codigo_val, claves_directas):
                         cant = extraer_num(ing[col_cant_n1])
                         cant_total_insumo += cant
                         inc_receta += cant * dif_precio
                         es_afectado = True
 
                 if es_afectado and inc_receta > 0:
-                    impactos_n1[str(nombre_receta).strip()] = inc_receta
+                    nom_n1_clean = str(nombre_receta).strip()
+                    impactos_n1[nom_n1_clean] = inc_receta
                     
-                    # Buscar costo base en Lista_N1
-                    row_lista = df_lista_n1[df_lista_n1[df_lista_n1.columns[0]].astype(str).str.strip() == str(nombre_receta).strip()]
+                    row_lista = df_lista_n1[df_lista_n1[df_lista_n1.columns[0]].astype(str).str.strip() == nom_n1_clean]
                     costo_base = 0.0
                     estado = "Activo"
                     if not row_lista.empty:
                         col_costo = next((c for c in row_lista.columns if "COSTO" in c.upper()), None)
                         col_est = next((c for c in row_lista.columns if "ESTADO" in c.upper()), None)
                         if col_costo: costo_base = extraer_num(row_lista.iloc[0][col_costo])
-                        if col_est: estado = row_lista.iloc[0][col_est]
+                        if col_est: estado = str(row_lista.iloc[0][col_est])
 
                     filas_resumen_n1.append({
-                        "Producto / Subreceta": nombre_receta,
+                        "Producto / Subreceta": nom_n1_clean,
                         "Estado": estado,
                         "Cantidad Usada": f"{cant_total_insumo:.3f}",
                         "Costo Actual": f"Bs {costo_base:.2f}",
@@ -249,41 +259,45 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
             filas_resumen_n2 = []
 
             for nombre_receta, df_ing in df_recetas_n2.groupby(col_prod_n2):
+                if not str(nombre_receta).strip():
+                    continue
+
                 inc_receta = 0.0
                 cant_usada_ref = 0.0
                 es_afectado = False
 
                 for _, ing in df_ing.iterrows():
-                    ing_texto = " ".join(ing.astype(str))
+                    ing_texto = construir_texto_fila(ing)
                     cant = extraer_num(ing[col_cant_n2])
 
-                    # 1. ¿Lleva el insumo directo?
-                    if verificar_ingrediente(ing_texto, claves_insumo):
+                    # 1. Directo del insumo
+                    if verificar_coincidencia_exacta(ing_texto, codigo_val, claves_directas):
                         inc_receta += cant * dif_precio
                         cant_usada_ref += cant
                         es_afectado = True
 
-                    # 2. ¿Lleva alguna subreceta N1 afectada?
+                    # 2. Desde subreceta N1
                     for n1_nombre, n1_inc in impactos_n1.items():
-                        if verificar_ingrediente(ing_texto, [n1_nombre]):
+                        if verificar_coincidencia_exacta(ing_texto, "", [n1_nombre]):
                             inc_receta += cant * n1_inc
                             cant_usada_ref += cant
                             es_afectado = True
 
                 if es_afectado and inc_receta > 0:
-                    impactos_n2[str(nombre_receta).strip()] = inc_receta
+                    nom_n2_clean = str(nombre_receta).strip()
+                    impactos_n2[nom_n2_clean] = inc_receta
 
-                    row_lista = df_lista_n2[df_lista_n2[df_lista_n2.columns[0]].astype(str).str.strip() == str(nombre_receta).strip()]
+                    row_lista = df_lista_n2[df_lista_n2[df_lista_n2.columns[0]].astype(str).str.strip() == nom_n2_clean]
                     costo_base = 0.0
                     estado = "Activo"
                     if not row_lista.empty:
                         col_costo = next((c for c in row_lista.columns if "COSTO" in c.upper()), None)
                         col_est = next((c for c in row_lista.columns if "ESTADO" in c.upper()), None)
                         if col_costo: costo_base = extraer_num(row_lista.iloc[0][col_costo])
-                        if col_est: estado = row_lista.iloc[0][col_est]
+                        if col_est: estado = str(row_lista.iloc[0][col_est])
 
                     filas_resumen_n2.append({
-                        "Producto / Subreceta": nombre_receta,
+                        "Producto / Subreceta": nom_n2_clean,
                         "Estado": estado,
                         "Cantidad Usada": f"{cant_usada_ref:.3f}",
                         "Costo Actual": f"Bs {costo_base:.2f}",
@@ -301,46 +315,50 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
             filas_resumen_n3 = []
 
             for nombre_receta, df_ing in df_recetas_n3.groupby(col_prod_n3):
+                if not str(nombre_receta).strip():
+                    continue
+
                 inc_receta = 0.0
                 cant_usada_ref = 0.0
                 es_afectado = False
 
                 for _, ing in df_ing.iterrows():
-                    ing_texto = " ".join(ing.astype(str))
+                    ing_texto = construir_texto_fila(ing)
                     cant = extraer_num(ing[col_cant_n3])
 
-                    # 1. ¿Lleva el insumo directo?
-                    if verificar_ingrediente(ing_texto, claves_insumo):
+                    # 1. Directo del insumo
+                    if verificar_coincidencia_exacta(ing_texto, codigo_val, claves_directas):
                         inc_receta += cant * dif_precio
                         cant_usada_ref += cant
                         es_afectado = True
 
-                    # 2. ¿Lleva alguna subreceta N1 afectada?
+                    # 2. Desde subreceta N1
                     for n1_nombre, n1_inc in impactos_n1.items():
-                        if verificar_ingrediente(ing_texto, [n1_nombre]):
+                        if verificar_coincidencia_exacta(ing_texto, "", [n1_nombre]):
                             inc_receta += cant * n1_inc
                             cant_usada_ref += cant
                             es_afectado = True
 
-                    # 3. ¿Lleva alguna subreceta N2 afectada?
+                    # 3. Desde subreceta N2
                     for n2_nombre, n2_inc in impactos_n2.items():
-                        if verificar_ingrediente(ing_texto, [n2_nombre]):
+                        if verificar_coincidencia_exacta(ing_texto, "", [n2_nombre]):
                             inc_receta += cant * n2_inc
                             cant_usada_ref += cant
                             es_afectado = True
 
                 if es_afectado and inc_receta > 0:
-                    row_lista = df_lista_n3[df_lista_n3[df_lista_n3.columns[0]].astype(str).str.strip() == str(nombre_receta).strip()]
+                    nom_n3_clean = str(nombre_receta).strip()
+                    row_lista = df_lista_n3[df_lista_n3[df_lista_n3.columns[0]].astype(str).str.strip() == nom_n3_clean]
                     costo_base = 0.0
                     estado = "Activo"
                     if not row_lista.empty:
                         col_costo = next((c for c in row_lista.columns if "COSTO" in c.upper()), None)
                         col_est = next((c for c in row_lista.columns if "ESTADO" in c.upper()), None)
                         if col_costo: costo_base = extraer_num(row_lista.iloc[0][col_costo])
-                        if col_est: estado = row_lista.iloc[0][col_est]
+                        if col_est: estado = str(row_lista.iloc[0][col_est])
 
                     filas_resumen_n3.append({
-                        "Producto / Subreceta": nombre_receta,
+                        "Producto / Subreceta": nom_n3_clean,
                         "Estado": estado,
                         "Cantidad Usada": f"{cant_usada_ref:.3f}",
                         "Costo Actual": f"Bs {costo_base:.2f}",
@@ -369,7 +387,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 if not resumen_l3.empty:
                     st.dataframe(resumen_l3, use_container_width=True)
                 else:
-                    st.info("No se encontraron productos finales afectados directamente ni por subrecetas.")
+                    st.info("No se encontraron productos finales afectados.")
 
             with resumen_tabs2:
                 st.write(f"**Productos Intermedios N2 Afectados:** {len(resumen_l2)}")
