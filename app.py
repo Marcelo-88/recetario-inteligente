@@ -106,6 +106,11 @@ def normalizar_texto(val):
         return ""
     return str(val).strip()
 
+def normalizar_codigo(val):
+    if pd.isna(val):
+        return ""
+    return str(val).strip().upper()
+
 def buscar_valor_columna(df_row, lista_palabras_clave):
     for col in df_row.index:
         col_upper = str(col).strip().upper()
@@ -396,7 +401,7 @@ elif modo_app == "📊 Control de Márgenes y Estados (N3)":
         st.error(f"Error al cargar el Control de Márgenes: {e}")
 
 # ------------------------------------------
-# MODO 3: SIMULACIÓN FINANCIERA MULTINIVEL (COMPLETA)
+# MODO 3: SIMULACIÓN FINANCIERA MULTINIVEL (BLINDADA)
 # ------------------------------------------
 elif modo_app == "🍰 Simulación Financiera Multinivel":
     st.markdown("## 🍰 Simulación Financiera Proporcional")
@@ -419,7 +424,7 @@ elif modo_app == "🍰 Simulación Financiera Multinivel":
         if opcion_elegida:
             datos_insumo = df_mermas[df_mermas["COMBO_LABEL"] == opcion_elegida].iloc[0]
             articulo_mostrar = normalizar_texto(datos_insumo[col_nom_m])
-            codigo_target_raw = normalizar_texto(datos_insumo[col_cod_m])
+            codigo_target_raw = normalizar_codigo(datos_insumo[col_cod_m])
             costo_actual_unitario = extraer_num(datos_insumo[col_costo_m])
 
             c1, c2, c3 = st.columns(3)
@@ -427,11 +432,13 @@ elif modo_app == "🍰 Simulación Financiera Multinivel":
                 st.metric("Código Insumo ERP", f"[{codigo_target_raw}]")
                 st.caption(f"**Nombre:** {articulo_mostrar}")
             with c2:
+                # Si el costo actual es 20, sugerimos por defecto un valor con variación (ej. +5) para ver el impacto
+                val_default = float(costo_actual_unitario + 5.0) if costo_actual_unitario > 0 else 10.0
                 nuevo_precio_unitario = st.number_input(
                     "Nuevo precio simulado por Lt/Kg (Bs):",
                     min_value=0.0,
-                    value=float(costo_actual_unitario if costo_actual_unitario > 0 else 10.0),
-                    step=0.10,
+                    value=val_default,
+                    step=0.50,
                 )
             with c3:
                 dif_precio_unitario = nuevo_precio_unitario - costo_actual_unitario
@@ -441,111 +448,116 @@ elif modo_app == "🍰 Simulación Financiera Multinivel":
             st.divider()
             st.subheader("2️⃣ Impacto en Cascada en Recetas (N1, N2 y N3)")
 
-            # Cargar tablas para el cálculo multinivel
-            df_recetas_n1 = cargar_pestaña("Recetas_N1")
-            df_recetas_n2 = cargar_pestaña("Recetas_N2")
-            df_recetas_n3 = cargar_pestaña("Recetas_N3")
-            df_lista_n3 = cargar_pestaña("Lista_N3")
-
-            # 1. EVOLUCIÓN N1
-            impacto_n1 = {}
-            if not df_recetas_n1.empty:
-                for _, r in df_recetas_n1.iterrows():
-                    cod_mp = normalizar_texto(r.iloc[2]) if len(r) > 2 else ""
-                    if cod_mp == codigo_target_raw:
-                        nom_rec_n1 = normalizar_texto(r.iloc[0])
-                        cant = extraer_num(r.iloc[4]) if len(r) > 4 else 0.0
-                        costo_adic = cant * dif_precio_unitario
-                        impacto_n1[nom_rec_n1] = impacto_n1.get(nom_rec_n1, 0.0) + costo_adic
-
-            # 2. EVOLUCIÓN N2
-            impacto_n2 = {}
-            if not df_recetas_n2.empty:
-                for _, r in df_recetas_n2.iterrows():
-                    nom_rec_n2 = normalizar_texto(r.iloc[0])
-                    # Insumo directo en N2
-                    cod_mp = normalizar_texto(r.iloc[2]) if len(r) > 2 else ""
-                    if cod_mp == codigo_target_raw:
-                        cant = extraer_num(r.iloc[4]) if len(r) > 4 else 0.0
-                        costo_adic = cant * dif_precio_unitario
-                        impacto_n2[nom_rec_n2] = impacto_n2.get(nom_rec_n2, 0.0) + costo_adic
-
-                    # Vía Subreceta N1
-                    nom_sub_n1 = normalizar_texto(r.iloc[6]) if len(r) > 6 else ""
-                    if nom_sub_n1 in impacto_n1:
-                        cant_sub_n1 = extraer_num(r.iloc[8]) if len(r) > 8 else 0.0
-                        impacto_n2[nom_rec_n2] = impacto_n2.get(nom_rec_n2, 0.0) + (cant_sub_n1 * impacto_n1[nom_sub_n1])
-
-            # 3. EVOLUCIÓN N3 (Productos Terminados)
-            impacto_n3 = {}
-            if not df_recetas_n3.empty:
-                for _, r in df_recetas_n3.iterrows():
-                    nom_rec_n3 = normalizar_texto(r.iloc[0])
-                    cod_mp = normalizar_texto(r.iloc[2]) if len(r) > 2 else ""
-                    
-                    # Directo MP
-                    if cod_mp == codigo_target_raw:
-                        cant = extraer_num(r.iloc[4]) if len(r) > 4 else 0.0
-                        costo_adic = cant * dif_precio_unitario
-                        impacto_n3[nom_rec_n3] = impacto_n3.get(nom_rec_n3, 0.0) + costo_adic
-
-                    # Vía N1
-                    nom_sub_n1 = normalizar_texto(r.iloc[6]) if len(r) > 6 else ""
-                    if nom_sub_n1 in impacto_n1:
-                        cant_sub_n1 = extraer_num(r.iloc[8]) if len(r) > 8 else 0.0
-                        impacto_n3[nom_rec_n3] = impacto_n3.get(nom_rec_n3, 0.0) + (cant_sub_n1 * impacto_n1[nom_sub_n1])
-
-                    # Vía N2
-                    nom_sub_n2 = normalizar_texto(r.iloc[10]) if len(r) > 10 else ""
-                    if nom_sub_n2 in impacto_n2:
-                        cant_sub_n2 = extraer_num(r.iloc[12]) if len(r) > 12 else 0.0
-                        impacto_n3[nom_rec_n3] = impacto_n3.get(nom_rec_n3, 0.0) + (cant_sub_n2 * impacto_n2[nom_sub_n2])
-
-            # MOSTRAR RESULTADOS RECALCULADOS DE PRODUCTOS AFECTADOS
-            filas_afectadas = []
-            for _, r in df_lista_n3.iterrows():
-                nom_p = normalizar_texto(r.iloc[0])
-                if nom_p in impacto_n3 and impacto_n3[nom_p] > 0:
-                    cod_p = normalizar_texto(r.iloc[1]) if len(r) > 1 else "-"
-                    costo_orig = buscar_valor_columna(r, ["Costo Total N3", "Costo R3", "Costo Total", "Costo"])
-                    pv1 = buscar_valor_columna(r, ["Precio Venta 1", "PV1", "Precio 1"])
-                    pv2 = buscar_valor_columna(r, ["Precio Venta 2", "PV2", "Precio 2"])
-
-                    costo_simulado = costo_orig + impacto_n3[nom_p]
-                    
-                    m1_orig = ((pv1 - costo_orig) / pv1 * 100) if pv1 > 0 else 0
-                    m1_sim = ((pv1 - costo_simulado) / pv1 * 100) if pv1 > 0 else 0
-
-                    m2_orig = ((pv2 - costo_orig) / pv2 * 100) if pv2 > 0 else 0
-                    m2_sim = ((pv2 - costo_simulado) / pv2 * 100) if pv2 > 0 else 0
-
-                    filas_afectadas.append({
-                        "Código ERP": cod_p,
-                        "Producto Terminado (N3)": nom_p,
-                        "Costo Orig. (Bs)": costo_orig,
-                        "Costo Simul. (Bs)": costo_simulado,
-                        "Incremento (Bs)": impacto_n3[nom_p],
-                        "Margen PV1 (Orig)": f"{m1_orig:.1f}%",
-                        "Margen PV1 (Simul)": f"{m1_sim:.1f}%",
-                        "Margen PV2 (Orig)": f"{m2_orig:.1f}%",
-                        "Margen PV2 (Simul)": f"{m2_sim:.1f}%",
-                    })
-
-            if filas_afectadas:
-                df_res_sim = pd.DataFrame(filas_afectadas)
-                st.success(f"🎯 Se encontraron **{len(df_res_sim)}** Productos Terminados (N3) afectados por la variación de este insumo:")
-                
-                st.dataframe(
-                    df_res_sim.style.format({
-                        "Costo Orig. (Bs)": "{:.2f} Bs",
-                        "Costo Simul. (Bs)": "{:.2f} Bs",
-                        "Incremento (Bs)": "+{:.2f} Bs",
-                    }),
-                    use_container_width=True,
-                    height=450
-                )
+            if abs(dif_precio_unitario) < 0.001:
+                st.info("💡 Cambia el **'Nuevo precio simulado'** arriba para ver el recalculo de costos y márgenes en los productos afectados.")
             else:
-                st.info("No se encontraron productos terminados N3 directamente afectados por este insumo o la variación es 0.")
+                # Cargar tablas para el cálculo multinivel
+                df_recetas_n1 = cargar_pestaña("Recetas_N1")
+                df_recetas_n2 = cargar_pestaña("Recetas_N2")
+                df_recetas_n3 = cargar_pestaña("Recetas_N3")
+                df_lista_n3 = cargar_pestaña("Lista_N3")
+
+                # 1. EVOLUCIÓN N1
+                impacto_n1 = {}
+                if not df_recetas_n1.empty:
+                    for _, r in df_recetas_n1.iterrows():
+                        cod_mp = normalizar_codigo(r.iloc[2]) if len(r) > 2 else ""
+                        if cod_mp == codigo_target_raw:
+                            nom_rec_n1 = normalizar_texto(r.iloc[0]).upper()
+                            cant = extraer_num(r.iloc[4]) if len(r) > 4 else 0.0
+                            costo_adic = cant * dif_precio_unitario
+                            impacto_n1[nom_rec_n1] = impacto_n1.get(nom_rec_n1, 0.0) + costo_adic
+
+                # 2. EVOLUCIÓN N2
+                impacto_n2 = {}
+                if not df_recetas_n2.empty:
+                    for _, r in df_recetas_n2.iterrows():
+                        nom_rec_n2 = normalizar_texto(r.iloc[0]).upper()
+                        # Directo en N2
+                        cod_mp = normalizar_codigo(r.iloc[2]) if len(r) > 2 else ""
+                        if cod_mp == codigo_target_raw:
+                            cant = extraer_num(r.iloc[4]) if len(r) > 4 else 0.0
+                            costo_adic = cant * dif_precio_unitario
+                            impacto_n2[nom_rec_n2] = impacto_n2.get(nom_rec_n2, 0.0) + costo_adic
+
+                        # Vía N1
+                        nom_sub_n1 = normalizar_texto(r.iloc[6]).upper() if len(r) > 6 else ""
+                        if nom_sub_n1 in impacto_n1:
+                            cant_sub_n1 = extraer_num(r.iloc[8]) if len(r) > 8 else 0.0
+                            impacto_n2[nom_rec_n2] = impacto_n2.get(nom_rec_n2, 0.0) + (cant_sub_n1 * impacto_n1[nom_sub_n1])
+
+                # 3. EVOLUCIÓN N3
+                impacto_n3 = {}
+                if not df_recetas_n3.empty:
+                    for _, r in df_recetas_n3.iterrows():
+                        nom_rec_n3 = normalizar_texto(r.iloc[0]).upper()
+                        cod_mp = normalizar_codigo(r.iloc[2]) if len(r) > 2 else ""
+                        
+                        # Directo MP
+                        if cod_mp == codigo_target_raw:
+                            cant = extraer_num(r.iloc[4]) if len(r) > 4 else 0.0
+                            costo_adic = cant * dif_precio_unitario
+                            impacto_n3[nom_rec_n3] = impacto_n3.get(nom_rec_n3, 0.0) + costo_adic
+
+                        # Vía N1
+                        nom_sub_n1 = normalizar_texto(r.iloc[6]).upper() if len(r) > 6 else ""
+                        if nom_sub_n1 in impacto_n1:
+                            cant_sub_n1 = extraer_num(r.iloc[8]) if len(r) > 8 else 0.0
+                            impacto_n3[nom_rec_n3] = impacto_n3.get(nom_rec_n3, 0.0) + (cant_sub_n1 * impacto_n1[nom_sub_n1])
+
+                        # Vía N2
+                        nom_sub_n2 = normalizar_texto(r.iloc[10]).upper() if len(r) > 10 else ""
+                        if nom_sub_n2 in impacto_n2:
+                            cant_sub_n2 = extraer_num(r.iloc[12]) if len(r) > 12 else 0.0
+                            impacto_n3[nom_rec_n3] = impacto_n3.get(nom_rec_n3, 0.0) + (cant_sub_n2 * impacto_n2[nom_sub_n2])
+
+                # CONSTRUIR TABLA DE PRODUCTOS AFECTADOS
+                filas_afectadas = []
+                for _, r in df_lista_n3.iterrows():
+                    nom_p = normalizar_texto(r.iloc[0])
+                    nom_p_key = nom_p.upper()
+                    
+                    if nom_p_key in impacto_n3 and impacto_n3[nom_p_key] > 0:
+                        cod_p = normalizar_texto(r.iloc[1]) if len(r) > 1 else "-"
+                        costo_orig = buscar_valor_columna(r, ["Costo Total N3", "Costo R3", "Costo Total", "Costo"])
+                        pv1 = buscar_valor_columna(r, ["Precio Venta 1", "PV1", "Precio 1"])
+                        pv2 = buscar_valor_columna(r, ["Precio Venta 2", "PV2", "Precio 2"])
+
+                        costo_simulado = costo_orig + impacto_n3[nom_p_key]
+                        
+                        m1_orig = ((pv1 - costo_orig) / pv1 * 100) if pv1 > 0 else 0
+                        m1_sim = ((pv1 - costo_simulado) / pv1 * 100) if pv1 > 0 else 0
+
+                        m2_orig = ((pv2 - costo_orig) / pv2 * 100) if pv2 > 0 else 0
+                        m2_sim = ((pv2 - costo_simulado) / pv2 * 100) if pv2 > 0 else 0
+
+                        filas_afectadas.append({
+                            "Código ERP": cod_p,
+                            "Producto Terminado (N3)": nom_p,
+                            "Costo Orig. (Bs)": costo_orig,
+                            "Costo Simul. (Bs)": costo_simulado,
+                            "Incremento (Bs)": impacto_n3[nom_p_key],
+                            "Margen PV1 (Orig)": f"{m1_orig:.1f}%",
+                            "Margen PV1 (Simul)": f"{m1_sim:.1f}%",
+                            "Margen PV2 (Orig)": f"{m2_orig:.1f}%",
+                            "Margen PV2 (Simul)": f"{m2_sim:.1f}%",
+                        })
+
+                if filas_afectadas:
+                    df_res_sim = pd.DataFrame(filas_afectadas)
+                    st.success(f"🎯 Se encontraron **{len(df_res_sim)}** Productos Terminados (N3) afectados por la variación de este insumo:")
+                    
+                    st.dataframe(
+                        df_res_sim.style.format({
+                            "Costo Orig. (Bs)": "{:.2f} Bs",
+                            "Costo Simul. (Bs)": "{:.2f} Bs",
+                            "Incremento (Bs)": "+{:.2f} Bs",
+                        }),
+                        use_container_width=True,
+                        height=450
+                    )
+                else:
+                    st.warning("No se encontraron coincidencias de recetas utilizando este insumo específico.")
 
     except Exception as e:
         st.error(f"Error en la pantalla de simulación: {e}")
