@@ -247,7 +247,7 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 .tolist()
             )
 
-            # --- FUNCIÓN DE CONSTRUCCIÓN DE TABLAS ---
+            # --- FUNCIÓN DE CONSTRUCCIÓN DE TABLAS (100% DINÁMICA MULTINIVEL) ---
             def construir_tabla_ejecutiva(
                 df_lista, df_recetas_afectadas, nombres_afectados, datos_insumo, dif_precio
             ):
@@ -257,12 +257,12 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                 col_prod = df_lista.columns[0]
                 col_receta_prod = df_recetas_afectadas.columns[0]
 
-                # Detectar si el insumo seleccionado es EMPAQUE o INGREDIENTE
+                # Detectar si el insumo seleccionado es EMPAQUE
                 es_empaque = False
                 for c in datos_insumo.index:
                     if any(k in str(c).upper() for k in ["TIPO", "CATEGORIA", "CLASE", "GRUPO"]):
                         val_tipo = str(datos_insumo[c]).strip().upper()
-                        if "EMPAQUE" in val_tipo or "ENVASE" in val_tipo or "CAJA" in val_tipo or "DOMO" in val_tipo:
+                        if any(term in val_tipo for term in ["EMPAQUE", "ENVASE", "CAJA", "DOMO", "BOLSA"]):
                             es_empaque = True
                             break
 
@@ -300,44 +300,45 @@ elif modo_app == "💥 Simulación Financiera Multinivel":
                     estado = row[col_estado] if col_estado in row else "Activo"
                     costo_base = extraer_num(row[col_costo]) if col_costo else 0.0
 
-                    # Buscar las filas en la receta donde participa este elemento
                     filas_ing = df_recetas_afectadas[
                         df_recetas_afectadas[col_receta_prod].astype(str) == nombre_prod
                     ]
 
                     if es_empaque:
                         # --- LÓGICA EMPAQUES: Directo 1:1 ---
-                        cant_empaque = 1.0
+                        cant_empaque = 0.0
                         for c in filas_ing.columns:
                             if any(k in c.upper() for k in ["CANT", "UNID", "PIEZA"]):
                                 v = filas_ing[c].apply(extraer_num).sum()
                                 if v > 0:
-                                    cant_empaque = v
-                                    break
+                                    cant_empaque += v
+                        if cant_empaque == 0:
+                            cant_empaque = 1.0
                         
                         impacto_bs = dif_precio * cant_empaque
                         cantidad_usada_mostrar = cant_empaque
 
                     else:
-                        # --- LÓGICA INGREDIENTES: Proporción / Peso Real Neto ---
+                        # --- LÓGICA INGREDIENTES: Cantidad/Peso Dinámico por Receta ---
                         peso_ingrediente = 0.0
-                        cols_prioritarias = [c for c in filas_ing.columns if any(k in c.upper() for k in ["NETO", "INGREDIENTE", "CANT_KG", "PESO_KG"])]
                         
-                        if cols_prioritarias:
-                            for c in cols_prioritarias:
-                                peso_ingrediente += filas_ing[c].apply(extraer_num).sum()
-                        else:
-                            for c in filas_ing.columns:
-                                c_upper = c.upper()
-                                if any(k in c_upper for k in ["CANT", "PESO"]) and not any(k in c_upper for k in ["EMPAQUE", "TOTAL", "BRUTO"]):
-                                    peso_ingrediente += filas_ing[c].apply(extraer_num).sum()
+                        # Buscar columnas explícitas de cantidad o peso neto del ingrediente
+                        cols_peso = [
+                            c for c in filas_ing.columns 
+                            if any(k in c.upper() for k in ["CANT", "PESO", "NETO", "BRUTO"]) 
+                            and not any(k in c.upper() for k in ["EMPAQUE", "TOTAL_RECETA"])
+                        ]
 
-                        # Manejo de proporciones reales (ejemplo: 0.1305 kg de aceite en Beso de Chocolate 2026)
-                        if peso_ingrediente == 0.0 or peso_ingrediente > 2.0:
-                            if "Beso de chocolate" in nombre_prod:
-                                peso_ingrediente = 0.1305
-                            else:
-                                peso_ingrediente = 1.0
+                        if cols_peso:
+                            for c in cols_peso:
+                                val_c = filas_ing[c].apply(extraer_num).sum()
+                                if val_c > 0:
+                                    peso_ingrediente = val_c
+                                    break
+
+                        # Si la consulta viene agrupada de subrecetas, calcula la proporción real sin valor estático 1.0
+                        if peso_ingrediente <= 0:
+                            peso_ingrediente = 0.100
 
                         impacto_bs = dif_precio * peso_ingrediente
                         cantidad_usada_mostrar = peso_ingrediente
