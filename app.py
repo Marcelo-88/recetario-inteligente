@@ -307,7 +307,6 @@ elif modo_app == "📊 Control de Márgenes y Estados (N3)":
                 col_estado = col
                 break
 
-        # Si no hay columna Estado explícita, usamos la última o la creamos
         if not col_estado:
             col_estado = df_lista_n3.columns[-1]
 
@@ -382,21 +381,24 @@ elif modo_app == "📊 Control de Márgenes y Estados (N3)":
                 else:
                     return "background-color: #F8D7DA; color: #721C24; font-weight: bold;"  # Rojo
 
-            # Aplicar estilos
-            tabla_estilizada = (
-                df_tabla_margenes.style
-                .applymap(colorear_pv1, subset=["% Margen PV1"])
-                .applymap(colorear_pv2, subset=["% Margen PV2"])
-                .format({
-                    "Costo R3 (Bs)": "{:.2f} Bs",
-                    "Precio Venta 1 (Bs)": "{:.2f} Bs",
-                    "% Margen PV1": "{:.1f}%",
-                    "Precio Venta 2 (Bs)": "{:.2f} Bs",
-                    "% Margen PV2": "{:.1f}%",
-                })
-            )
+            # Aplicar estilos utilizando .map() (compatible con Pandas >= 2.1)
+            # con fallback a .applymap por si el entorno usara una versión muy antigua de Pandas
+            styler = df_tabla_margenes.style
+            
+            if hasattr(styler, "map"):
+                styler = styler.map(colorear_pv1, subset=["% Margen PV1"]).map(colorear_pv2, subset=["% Margen PV2"])
+            else:
+                styler = styler.applymap(colorear_pv1, subset=["% Margen PV1"]).applymap(colorear_pv2, subset=["% Margen PV2"])
 
-            # Leyenda de colores explicativa
+            tabla_estilizada = styler.format({
+                "Costo R3 (Bs)": "{:.2f} Bs",
+                "Precio Venta 1 (Bs)": "{:.2f} Bs",
+                "% Margen PV1": "{:.1f}%",
+                "Precio Venta 2 (Bs)": "{:.2f} Bs",
+                "% Margen PV2": "{:.1f}%",
+            })
+
+            # Leyenda explicativa
             st.markdown("""
                 <div style="display:flex; gap:15px; margin-bottom:10px; font-size:0.85rem;">
                     <span><b>Leyenda PV1:</b> 🟢 $\ge$ 60% | 🟡 55% - 59% | 🔴 < 55%</span>
