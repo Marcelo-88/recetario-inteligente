@@ -82,7 +82,7 @@ def cargar_pestaña(nombre_pestaña):
 
 
 def obtener_roles_desde_sheet():
-    """Carga y procesa la pestaña Usuarios_Autorizados"""
+    """Carga y procesa la pestaña Usuarios_Autorizados incluyendo la columna PIN"""
     try:
         df_users = cargar_pestaña("Usuarios_Autorizados")
         df_users.columns = [str(c).upper().strip() for c in df_users.columns]
@@ -92,10 +92,13 @@ def obtener_roles_desde_sheet():
             email = str(row.get("EMAIL", "")).strip().lower()
             nombre = str(row.get("NOMBRE", "")).strip()
             rol = str(row.get("ROL", "")).strip().upper()
+            pin = str(row.get("PIN", "")).strip() # Extrae la columna PIN
+            
             if email and "@" in email:
                 dict_usuarios[email] = {
                     "nombre": nombre if nombre else email.split("@")[0].capitalize(),
-                    "rol": rol
+                    "rol": rol,
+                    "pin": pin
                 }
         return dict_usuarios
     except Exception as e:
@@ -292,14 +295,24 @@ st.sidebar.markdown("### 🔐 Inicio de Sesión")
 
 if not st.session_state["usuario_mail"]:
     with st.sidebar.form("form_login"):
-        mail_input = st.text_input("Ingresa tu Correo Corporativo:", placeholder="ejemplo@fridolin.com.bo").strip().lower()
+        mail_input = st.text_input("Correo Corporativo:", placeholder="ejemplo@fridolin.com.bo").strip().lower()
+        pin_input = st.text_input("PIN de Acceso:", type="password", placeholder="****").strip()
         btn_login = st.form_submit_button("Ingresar", use_container_width=True)
+        
         if btn_login:
-            if "@" in mail_input and "." in mail_input:
-                st.session_state["usuario_mail"] = mail_input
-                st.rerun()
-            else:
+            if "@" not in mail_input or "." not in mail_input:
                 st.sidebar.error("⚠️ Ingresa un correo electrónico válido.")
+            elif mail_input not in usuarios_registrados:
+                st.sidebar.error("❌ El correo no se encuentra registrado en el sistema.")
+            else:
+                user_info = usuarios_registrados[mail_input]
+                pin_guardado = user_info.get("pin", "")
+                
+                if pin_input == pin_guardado and pin_guardado != "":
+                    st.session_state["usuario_mail"] = mail_input
+                    st.rerun()
+                else:
+                    st.sidebar.error("🔑 PIN incorrecto. Inténtalo de nuevo.")
 else:
     mail_actual = st.session_state["usuario_mail"]
     datos_user = usuarios_registrados.get(mail_actual, {})
