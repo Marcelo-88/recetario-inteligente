@@ -292,6 +292,17 @@ modo_app = st.sidebar.radio(
 )
 st.sidebar.divider()
 
+# Selector de Perfil / Rol de usuario
+st.sidebar.markdown("### 👤 Configuración de Perfil")
+rol_usuario = st.sidebar.selectbox(
+    "Rol activo:",
+    ["👑 Administrador / Calidad", "👷 Operador / Planta"],
+    help="El Administrador/Calidad puede cambiar los estados de las observaciones registradas."
+)
+es_admin = rol_usuario == "👑 Administrador / Calidad"
+
+st.sidebar.divider()
+
 # ------------------------------------------
 # MODO 1: FICHA TÉCNICA DE PRODUCTO (N3)
 # ------------------------------------------
@@ -837,9 +848,12 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
     st.markdown("## 💬 Feedback & Bitácora de Cambios de Recetas")
     st.caption("Canal directo entre Planta, Control de Calidad y Chefs Ejecutivos.")
 
-    # Inicializar estado en memoria para guardar comentarios durante la sesión
+    # Inicializar estructuras en memoria si no existen
     if "comentarios_locales" not in st.session_state:
         st.session_state["comentarios_locales"] = []
+    if "estados_editados" not in st.session_state:
+        # Formato { id_unico: nuevo_estado }
+        st.session_state["estados_editados"] = {}
 
     try:
         # Cargar lista de productos N3
@@ -883,32 +897,29 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
                 
                 with st.form("form_nuevo_comentario", clear_on_submit=True):
                     usuario_input = st.text_input("👤 Tu Nombre / Área:", placeholder="Ej: Ever (Calidad)")
-                    estado_input = st.selectbox(
-                        "📌 Estado / Prioridad:",
-                        ["PENDIENTE", "LEÍDO", "EN EJECUCIÓN", "APROBADO", "RECHAZADO"]
-                    )
                     comentario_input = st.text_area("📝 Observación o Sugerencia:", placeholder="Escribe aquí el detalle...")
                     
-                    btn_guardar = st.form_submit_button("💾 Guardar Observación", use_container_width=True)
+                    btn_guardar = st.form_submit_button("💾 Emitir Observación", use_container_width=True)
                     
                     if btn_guardar:
                         if not usuario_input.strip() or not comentario_input.strip():
                             st.error("⚠️ Por favor completa tu nombre y el comentario antes de guardar.")
                         else:
                             fecha_actual = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                            id_nuevo = f"loc_{len(st.session_state['comentarios_locales']) + 1}_{int(datetime.datetime.now().timestamp())}"
                             
-                            # Insertar registro al inicio del listado en sesión
+                            # Toda observación nueva entra obligatoriamente como PENDIENTE
                             nuevo_reg = {
+                                "ID": id_nuevo,
                                 "CODIGO": str(codigo_receta).upper().strip(),
                                 "RECETA": nombre_receta,
                                 "USUARIO": usuario_input,
                                 "FECHA": fecha_actual,
                                 "COMENTARIO": comentario_input,
-                                "ESTADO": estado_input
+                                "ESTADO": "PENDIENTE"
                             }
                             st.session_state["comentarios_locales"].insert(0, nuevo_reg)
-                            
-                            st.success(f"✅ ¡Observación agregada con éxito para [{codigo_receta}]!")
+                            st.success(f"✅ ¡Observación enviada como **PENDIENTE** para [{codigo_receta}]!")
                             st.rerun()
 
             with col_chat:
@@ -919,8 +930,10 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
                 if not df_comentarios_sheet.empty and "CODIGO" in df_comentarios_sheet.columns:
                     mask_codigo = df_comentarios_sheet["CODIGO"].astype(str).str.upper().str.strip() == str(codigo_receta).upper().strip()
                     df_filtrado_sheet = df_comentarios_sheet[mask_codigo]
-                    for _, r in df_filtrado_sheet.iterrows():
+                    for idx_s, r in df_filtrado_sheet.iterrows():
+                        id_sheet = f"sheet_{idx_s}"
                         list_comb.append({
+                            "ID": id_sheet,
                             "USUARIO": r.get("USUARIO", "Anónimo"),
                             "ESTADO": r.get("ESTADO", "PENDIENTE"),
                             "COMENTARIO": r.get("COMENTARIO", ""),
@@ -933,8 +946,10 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
                     if c["CODIGO"] == str(codigo_receta).upper().strip()
                 ]
 
-                # 3. Combinar ambos (los locales aparecen primero arriba)
+                # 3. Combinar ambos (los locales arriba)
                 todos_comentarios = locales_prod + list_comb
+
+                lista_opciones_estado = ["PENDIENTE", "LEÍDO", "EN EJECUCIÓN", "APROBADO", "RECHAZADO"]
 
                 def render_badge(estado):
                     colores = {
@@ -945,30 +960,71 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
                         "RECHAZADO": ("#FEE2E2", "#991B1B", "❌"),
                     }
                     bg, fg, ico = colores.get(str(estado).upper().strip(), ("#E5E7EB", "#374151", "📌"))
-                    return f'<span style="background-color:{bg}; color:{fg}; padding: 3px 8px; border-radius: 10px; font-weight: 600; font-size: 0.78rem;">{ico} {estado}</span>'
+                    return f'<span style="background-color:{bg}; color:{fg}; padding: 4px 10px; border-radius: 12px; font-weight: 600; font-size: 0.8rem;">{ico} {estado}</span>'
 
-                # Contenedor visual del Historial
-                chat_box = st.container(height=480)
+                # Contenedor del Historial
+                chat_box = st.container(height=520)
                 with chat_box:
                     if not todos_comentarios:
                         st.write("🕒 *No hay comentarios o solicitudes registradas para esta receta.*")
                     else:
                         for item in todos_comentarios:
-                            badge = render_badge(item.get("ESTADO", "PENDIENTE"))
+                            item_id = item["ID"]
+                            
+                            # Verificar si el estado fue modificado durante esta sesión
+                            estado_actual = st.session_state["estados_editados"].get(item_id, item.get("ESTADO", "PENDIENTE"))
+                            if str(estado_actual).strip() == "":
+                                estado_actual = "PENDIENTE"
+                                
                             usuario_nom = item.get("USUARIO", "Anónimo")
                             comentario_txt = item.get("COMENTARIO", "")
                             fecha_txt = item.get("FECHA", "")
                             
-                            st.markdown(f"""
-                            <div style="background-color: #FFFFFF; border: 1px solid #EBE5DF; border-radius: 8px; padding: 12px; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
-                                <div style="display:flex; justify-content:space-between; align-items:center;">
-                                    <strong style="color: #8B1D2C;">👤 {usuario_nom}</strong>
-                                    {badge}
+                            # Tarjeta contenedor del comentario
+                            with st.container():
+                                st.markdown(f"""
+                                <div style="background-color: #FFFFFF; border: 1px solid #EBE5DF; border-radius: 8px; padding: 12px 14px 6px 14px; margin-bottom: 4px;">
+                                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                                        <strong style="color: #8B1D2C;">👤 {usuario_nom}</strong>
+                                        <span style="font-size:0.75rem; color:#888;">📅 {fecha_txt}</span>
+                                    </div>
+                                    <p style="margin: 8px 0; font-size: 0.9rem; color: #333;">{comentario_txt}</p>
                                 </div>
-                                <p style="margin: 8px 0; font-size: 0.9rem; color: #333;">{comentario_txt}</p>
-                                <small style="color: #888; font-size: 0.75rem;">📅 {fecha_txt}</small>
-                            </div>
-                            """, unsafe_allow_html=True)
+                                """, unsafe_allow_html=True)
+                                
+                                # Si el usuario activo es ADMINISTRADOR / CALIDAD, puede modificar el estado
+                                if es_admin:
+                                    c_lbl, c_sel = st.columns([1, 2])
+                                    with c_lbl:
+                                        st.caption("⚙️ **Cambiar Estado:**")
+                                    with c_sel:
+                                        idx_default = (
+                                            lista_opciones_estado.index(str(estado_actual).upper().strip())
+                                            if str(estado_actual).upper().strip() in lista_opciones_estado
+                                            else 0
+                                        )
+                                        nuevo_st = st.selectbox(
+                                            f"Estado para {item_id}",
+                                            lista_opciones_estado,
+                                            index=idx_default,
+                                            key=f"select_st_{item_id}",
+                                            label_visibility="collapsed"
+                                        )
+                                        
+                                        # Guardar el cambio si fue modificado
+                                        if nuevo_st != estado_actual:
+                                            st.session_state["estados_editados"][item_id] = nuevo_st
+                                            
+                                            # Actualizar también la lista de comentarios locales si aplica
+                                            for loc in st.session_state["comentarios_locales"]:
+                                                if loc["ID"] == item_id:
+                                                    loc["ESTADO"] = nuevo_st
+                                            st.rerun()
+                                else:
+                                    # Para Operadores normales solo se muestra el estado fijo
+                                    st.markdown(f"<div style='margin-bottom:12px;'>{render_badge(estado_actual)}</div>", unsafe_allow_html=True)
+
+                                st.markdown("<hr style='margin:10px 0; border:0; border-top:1px dashed #DDD;' />", unsafe_allow_html=True)
 
     except Exception as e:
         st.error(f"Error al cargar la bitácora de comentarios: {e}")
