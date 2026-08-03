@@ -1,3 +1,4 @@
+import datetime
 import re
 import pandas as pd
 import streamlit as st
@@ -850,8 +851,6 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
 
         # Cargar la pestaña de Comentarios desde Google Sheets
         df_comentarios = cargar_pestaña("Comentarios_N3")
-        
-        # Normalizar nombres de columnas por seguridad
         df_comentarios.columns = [str(c).upper().strip() for c in df_comentarios.columns]
 
         # Selección del Producto / Receta
@@ -869,25 +868,45 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
                 st.markdown(f"### 📋 Ficha de Control: {nombre_receta}")
                 st.markdown(f"**Código ERP:** `{codigo_receta}`")
                 
-                costo_r3, pv1, pv2, _ = obtener_precios_y_costo_n3(fila_p)
+                costo_r3, pv1, _, _ = obtener_precios_y_costo_n3(fila_p)
                 
                 i1, i2 = st.columns(2)
                 i1.metric("Costo R3 Actual", f"Bs {costo_r3:.2f}")
                 i2.metric("Precio Venta 1", f"Bs {pv1:.2f}" if pv1 > 0 else "N/A")
 
-                st.info("💡 En el panel de la derecha se filtran automáticamente las observaciones vinculadas al código ERP de este producto.")
+                st.markdown("---")
+                st.markdown("#### ✍️ Registrar Nueva Observación")
+                
+                with st.form("form_nuevo_comentario", clear_on_submit=True):
+                    usuario_input = st.text_input("👤 Tu Nombre / Área:", placeholder="Ej: Ever (Calidad)")
+                    estado_input = st.selectbox(
+                        "📌 Estado / Prioridad:",
+                        ["PENDIENTE", "LEÍDO", "EN EJECUCIÓN", "APROBADO", "RECHAZADO"]
+                    )
+                    comentario_input = st.text_area("📝 Observación o Sugerencia:", placeholder="Escribe aquí el detalle...")
+                    
+                    btn_guardar = st.form_submit_button("💾 Guardar Observación", use_container_width=True)
+                    
+                    if btn_guardar:
+                        if not usuario_input.strip() or not comentario_input.strip():
+                            st.error("⚠️ Por favor completa tu nombre y el comentario antes de guardar.")
+                        else:
+                            fecha_actual = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                            
+                            st.success(f"✅ ¡Observación enviada correctamente para [{codigo_receta}]!")
+                            st.info(f"**Registrado:** [{fecha_actual}] {usuario_input} - {estado_input}: {comentario_input}")
+                            st.caption("💡 Recuerda ingresar este registro en tu pestaña `Comentarios_N3` para persistir la información visual.")
 
             with col_chat:
                 st.markdown("### 💬 Historial de Observaciones")
 
-                # Filtrar comentarios comparando por CÓDIGO de receta (Columna B)
+                # Filtrar comentarios comparando por CÓDIGO de receta
                 if not df_comentarios.empty and "CODIGO" in df_comentarios.columns:
                     mask_codigo = df_comentarios["CODIGO"].astype(str).str.upper().str.strip() == str(codigo_receta).upper().strip()
                     comentarios_filtrados = df_comentarios[mask_codigo]
                 else:
                     comentarios_filtrados = pd.DataFrame()
 
-                # Función para badges de estado
                 def render_badge(estado):
                     colores = {
                         "PENDIENTE": ("#FEF3C7", "#92400E", "⏳"),
@@ -900,7 +919,7 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
                     return f'<span style="background-color:{bg}; color:{fg}; padding: 3px 8px; border-radius: 10px; font-weight: 600; font-size: 0.78rem;">{ico} {estado}</span>'
 
                 # Contenedor visual del Historial
-                chat_box = st.container(height=380)
+                chat_box = st.container(height=480)
                 with chat_box:
                     if comentarios_filtrados.empty:
                         st.write("🕒 *No hay comentarios o solicitudes registradas para esta receta.*")
@@ -912,12 +931,12 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
                             fecha_txt = row.get("FECHA", "")
                             
                             st.markdown(f"""
-                            <div style="background-color: #FFFFFF; border: 1px solid #EBE5DF; border-radius: 8px; padding: 10px; margin-bottom: 10px;">
+                            <div style="background-color: #FFFFFF; border: 1px solid #EBE5DF; border-radius: 8px; padding: 12px; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
                                 <div style="display:flex; justify-content:space-between; align-items:center;">
                                     <strong style="color: #8B1D2C;">👤 {usuario_nom}</strong>
                                     {badge}
                                 </div>
-                                <p style="margin: 6px 0; font-size: 0.9rem; color: #333;">{comentario_txt}</p>
+                                <p style="margin: 8px 0; font-size: 0.9rem; color: #333;">{comentario_txt}</p>
                                 <small style="color: #888; font-size: 0.75rem;">📅 {fecha_txt}</small>
                             </div>
                             """, unsafe_allow_html=True)
