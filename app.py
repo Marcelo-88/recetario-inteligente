@@ -92,7 +92,7 @@ def obtener_roles_desde_sheet():
             email = str(row.get("EMAIL", "")).strip().lower()
             nombre = str(row.get("NOMBRE", "")).strip()
             rol = str(row.get("ROL", "")).strip().upper()
-            pin = str(row.get("PIN", "")).strip() # Extrae la columna PIN
+            pin = str(row.get("PIN", "")).strip()
             
             if email and "@" in email:
                 dict_usuarios[email] = {
@@ -321,7 +321,7 @@ else:
     rol_usuario = datos_user.get("rol", "SOLO LECTURA")
 
     es_admin = rol_usuario == "ADMINISTRADOR"
-    es_operador = rol_usuario in ["OPERADOR", "ADMINISTRADOR"]
+    es_operador = rol_usuario in ["OPERADOR", "ADMINISTRADOR", "OPERADOR AUTORIZADO"]
 
     st.sidebar.success(f"👤 **Usuario:** {nombre_usuario}\n\n`{mail_actual}`")
     
@@ -330,7 +330,7 @@ else:
     elif es_operador:
         st.sidebar.markdown("👷 **Rol:** `OPERADOR AUTORIZADO`")
     else:
-        st.sidebar.warning("👁️ **Rol:** `SOLO LECTURA` (No registrado)")
+        st.sidebar.warning("👁️ **Rol:** `SOLO LECTURA`")
 
     if st.sidebar.button("Cerrar Sesión", use_container_width=True):
         st.session_state["usuario_mail"] = ""
@@ -914,6 +914,16 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
     if "estados_editados" not in st.session_state:
         st.session_state["estados_editados"] = {}
 
+    def actualizar_estado_callback(item_id, key_widget):
+        nuevo_valor = st.session_state[key_widget]
+        st.session_state["estados_editados"][item_id] = nuevo_valor
+
+        for loc in st.session_state["comentarios_locales"]:
+            if loc["ID"] == item_id:
+                loc["ESTADO"] = nuevo_valor
+                break
+        st.toast(f"✅ Estado actualizado a: {nuevo_valor}", icon="🔄")
+
     try:
         df_lista_n3 = cargar_pestaña("Lista_N3")
         col_nom_n3 = df_lista_n3.columns[0]
@@ -951,45 +961,58 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
                 st.markdown("---")
                 st.markdown("#### ✍️ Registrar Nueva Observación")
                 
-                mail_actual = st.session_state.get("usuario_mail", "").lower()
-                datos_u = usuarios_registrados.get(mail_actual, {})
+                mail_actual = st.session_state.get("usuario_mail", "").strip().lower()
                 
-                nombre_u = datos_u.get("nombre", mail_actual)
-                rol_u = datos_u.get("rol", "SOLO LECTURA")
-
-                es_admin = rol_u == "ADMINISTRADOR"
-                es_operador = rol_u in ["OPERADOR", "ADMINISTRADOR"]
-
                 if not mail_actual:
                     st.warning("🔒 Debes **Iniciar Sesión** en la barra lateral con tu correo corporativo para emitir observaciones.")
-                elif not es_operador:
-                    st.error(f"🚫 El correo `{mail_actual}` no está registrado en la pestaña **Usuarios_Autorizados**.")
                 else:
-                    with st.form("form_nuevo_comentario", clear_on_submit=True):
-                        st.text_input("👤 Registrado por:", value=f"{nombre_u} ({mail_actual})", disabled=True)
-                        comentario_input = st.text_area("📝 Observación o Sugerencia:", placeholder="Escribe aquí el detalle...")
-                        
-                        btn_guardar = st.form_submit_button("💾 Emitir Observación", use_container_width=True)
-                        
-                        if btn_guardar:
-                            if not comentario_input.strip():
-                                st.error("⚠️ El comentario no puede estar vacío.")
-                            else:
-                                fecha_actual = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-                                id_nuevo = f"loc_{len(st.session_state['comentarios_locales']) + 1}_{int(datetime.datetime.now().timestamp())}"
-                                
-                                nuevo_reg = {
-                                    "ID": id_nuevo,
-                                    "CODIGO": str(codigo_receta).upper().strip(),
-                                    "RECETA": nombre_receta,
-                                    "USUARIO": f"{nombre_u} ({mail_actual})",
-                                    "FECHA": fecha_actual,
-                                    "COMENTARIO": comentario_input,
-                                    "ESTADO": "PENDIENTE"
-                                }
-                                st.session_state["comentarios_locales"].insert(0, nuevo_reg)
-                                st.success(f"✅ Observación registrada como PENDIENTE por **{nombre_u}**.")
-                                st.rerun()
+                    datos_u = usuarios_registrados.get(mail_actual, {})
+                    nombre_u = datos_u.get("nombre", mail_actual.split("@")[0].capitalize())
+                    rol_u = str(datos_u.get("rol", "")).strip().upper()
+
+                    es_autorizado = rol_u in ["ADMINISTRADOR", "OPERADOR", "OPERADOR AUTORIZADO"]
+
+                    if not es_autorizado:
+                        st.error(f"🚫 El usuario `{mail_actual}` con rol **{rol_u}** no tiene permisos para emitir observaciones.")
+                    else:
+                        with st.form(key=f"form_obs_{codigo_receta}", clear_on_submit=True):
+                            st.text_input(
+                                "👤 Registrado por:", 
+                                value=f"{nombre_u} ({mail_actual})", 
+                                disabled=True
+                            )
+                            
+                            comentario_input = st.text_area(
+                                "📝 Observación o Sugerencia:", 
+                                placeholder="Escribe aquí el detalle de la observación...",
+                                key=f"txt_obs_{codigo_receta}"
+                            )
+                            
+                            btn_guardar = st.form_submit_button(
+                                "💾 Emitir Observación", 
+                                use_container_width=True
+                            )
+                            
+                            if btn_guardar:
+                                texto_limpio = comentario_input.strip()
+                                if not texto_limpio:
+                                    st.error("⚠️ Por favor escribe una observación antes de enviar.")
+                                else:
+                                    fecha_actual = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                                    id_nuevo = f"obs_{int(datetime.datetime.now().timestamp())}"
+                                    
+                                    nuevo_reg = {
+                                        "ID": id_nuevo,
+                                        "CODIGO": str(codigo_receta).upper().strip(),
+                                        "RECETA": nombre_receta,
+                                        "USUARIO": nombre_u,
+                                        "FECHA": fecha_actual,
+                                        "COMENTARIO": texto_limpio,
+                                        "ESTADO": "PENDIENTE"
+                                    }
+                                    st.session_state["comentarios_locales"].insert(0, nuevo_reg)
+                                    st.success("✅ Observación registrada correctamente en la sesión.")
+                                    st.rerun()
 
             with col_chat:
                 st.markdown("### 💬 Historial de Observaciones")
@@ -1027,6 +1050,12 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
                     bg, fg, ico = colores.get(str(estado).upper().strip(), ("#E5E7EB", "#374151", "📌"))
                     return f'<span style="background-color:{bg}; color:{fg}; padding: 4px 10px; border-radius: 12px; font-weight: 600; font-size: 0.8rem;">{ico} {estado}</span>'
 
+                # Evaluar rol activo para permisos de cambio de estado
+                user_activo_mail = st.session_state.get("usuario_mail", "").strip().lower()
+                datos_act = usuarios_registrados.get(user_activo_mail, {})
+                rol_actual_user = str(datos_act.get("rol", "")).strip().upper()
+                es_user_admin = rol_actual_user == "ADMINISTRADOR"
+
                 chat_box = st.container(height=520)
                 with chat_box:
                     if not todos_comentarios:
@@ -1054,30 +1083,24 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
                                 """, unsafe_allow_html=True)
                                 
                                 # CONTROL DE PERMISOS: Solo Administradores pueden cambiar estados
-                                if es_admin:
+                                if es_user_admin:
+                                    key_widget = f"select_st_{item_id}"
+                                    
+                                    if key_widget not in st.session_state:
+                                        st.session_state[key_widget] = estado_actual
+
                                     c_lbl, c_sel = st.columns([1, 2])
                                     with c_lbl:
                                         st.caption("⚙️ **Cambiar Estado:**")
                                     with c_sel:
-                                        idx_default = (
-                                            lista_opciones_estado.index(str(estado_actual).upper().strip())
-                                            if str(estado_actual).upper().strip() in lista_opciones_estado
-                                            else 0
-                                        )
-                                        nuevo_st = st.selectbox(
-                                            f"Estado para {item_id}",
+                                        st.selectbox(
+                                            "Estado",
                                             lista_opciones_estado,
-                                            index=idx_default,
-                                            key=f"select_st_{item_id}",
+                                            key=key_widget,
+                                            on_change=actualizar_estado_callback,
+                                            args=(item_id, key_widget),
                                             label_visibility="collapsed"
                                         )
-                                        
-                                        if nuevo_st != estado_actual:
-                                            st.session_state["estados_editados"][item_id] = nuevo_st
-                                            for loc in st.session_state["comentarios_locales"]:
-                                                if loc["ID"] == item_id:
-                                                    loc["ESTADO"] = nuevo_st
-                                            st.rerun()
                                 else:
                                     st.markdown(f"<div style='margin-bottom:12px;'>{render_badge(estado_actual)}</div>", unsafe_allow_html=True)
 
