@@ -63,30 +63,12 @@ CSS_FRIDOLIN = """
         color: #8B1D2C !important;
         font-weight: 700 !important;
     }
-
-    .st-emotion-cache-p5msec, .streamlit-expanderHeader {
-        font-family: 'Poppins', sans-serif !important;
-        font-weight: 600 !important;
-    }
 </style>
 """
 st.markdown(CSS_FRIDOLIN, unsafe_allow_html=True)
 
 # ==========================================
-# 2. ENCABEZADO PRINCIPAL (BANNER)
-# ==========================================
-st.markdown(
-    """
-    <div class="header-fridolin">
-        <h1>Fridolin • Centro de Control & Simulación Multinivel</h1>
-        <p>Gestión Inteligente de Recetas N1, N2 y N3 • Análisis de Impacto Financiero & Bitácora</p>
-    </div>
-""",
-    unsafe_allow_html=True,
-)
-
-# ==========================================
-# 3. CARGA Y FUNCIONES AUXILIARES DE DATOS
+# 2. CARGA Y FUNCIONES AUXILIARES DE DATOS
 # ==========================================
 ID_HOJA = "1Y8Dzxl_1jVCUrceAQVfSc94RNugo2cgRsrHJwXLwmU4"
 
@@ -97,6 +79,28 @@ def cargar_pestaña(nombre_pestaña):
     df = pd.read_csv(url, dtype=str)
     df.columns = [re.sub(r"\s+", " ", str(c)).strip() for c in df.columns]
     return df.fillna("")
+
+
+def obtener_roles_desde_sheet():
+    """Carga y procesa la pestaña Usuarios_Autorizados"""
+    try:
+        df_users = cargar_pestaña("Usuarios_Autorizados")
+        df_users.columns = [str(c).upper().strip() for c in df_users.columns]
+        
+        dict_usuarios = {}
+        for _, row in df_users.iterrows():
+            email = str(row.get("EMAIL", "")).strip().lower()
+            nombre = str(row.get("NOMBRE", "")).strip()
+            rol = str(row.get("ROL", "")).strip().upper()
+            if email and "@" in email:
+                dict_usuarios[email] = {
+                    "nombre": nombre if nombre else email.split("@")[0].capitalize(),
+                    "rol": rol
+                }
+        return dict_usuarios
+    except Exception as e:
+        st.sidebar.error(f"Error cargando lista de usuarios: {e}")
+        return {}
 
 
 def normalizar_cod(val):
@@ -277,8 +281,63 @@ def extraer_componentes_por_columnas(filas_receta):
 
 
 # ==========================================
-# 4. MENÚ LATERAL Y NAVEGACIÓN
+# 3. AUTENTICACIÓN DINÁMICA DE USUARIO (SIDEBAR)
 # ==========================================
+if "usuario_mail" not in st.session_state:
+    st.session_state["usuario_mail"] = ""
+
+usuarios_registrados = obtener_roles_desde_sheet()
+
+st.sidebar.markdown("### 🔐 Inicio de Sesión")
+
+if not st.session_state["usuario_mail"]:
+    with st.sidebar.form("form_login"):
+        mail_input = st.text_input("Ingresa tu Correo Corporativo:", placeholder="ejemplo@fridolin.com.bo").strip().lower()
+        btn_login = st.form_submit_button("Ingresar", use_container_width=True)
+        if btn_login:
+            if "@" in mail_input and "." in mail_input:
+                st.session_state["usuario_mail"] = mail_input
+                st.rerun()
+            else:
+                st.sidebar.error("⚠️ Ingresa un correo electrónico válido.")
+else:
+    mail_actual = st.session_state["usuario_mail"]
+    datos_user = usuarios_registrados.get(mail_actual, {})
+    
+    nombre_usuario = datos_user.get("nombre", mail_actual)
+    rol_usuario = datos_user.get("rol", "SOLO LECTURA")
+
+    es_admin = rol_usuario == "ADMINISTRADOR"
+    es_operador = rol_usuario in ["OPERADOR", "ADMINISTRADOR"]
+
+    st.sidebar.success(f"👤 **Usuario:** {nombre_usuario}\n\n`{mail_actual}`")
+    
+    if es_admin:
+        st.sidebar.markdown("👑 **Rol:** `ADMINISTRADOR`")
+    elif es_operador:
+        st.sidebar.markdown("👷 **Rol:** `OPERADOR AUTORIZADO`")
+    else:
+        st.sidebar.warning("👁️ **Rol:** `SOLO LECTURA` (No registrado)")
+
+    if st.sidebar.button("Cerrar Sesión", use_container_width=True):
+        st.session_state["usuario_mail"] = ""
+        st.rerun()
+
+st.sidebar.divider()
+
+# ==========================================
+# 4. ENCABEZADO Y NAVEGACIÓN
+# ==========================================
+st.markdown(
+    """
+    <div class="header-fridolin">
+        <h1>Fridolin • Centro de Control & Simulación Multinivel</h1>
+        <p>Gestión Inteligente de Recetas N1, N2 y N3 • Análisis de Impacto Financiero & Bitácora</p>
+    </div>
+""",
+    unsafe_allow_html=True,
+)
+
 st.sidebar.markdown("### 🥧 Menú Principal")
 modo_app = st.sidebar.radio(
     "Selecciona la función:",
@@ -290,17 +349,6 @@ modo_app = st.sidebar.radio(
         "📖 Explorador de Tablas",
     ],
 )
-st.sidebar.divider()
-
-# Selector de Perfil / Rol de usuario
-st.sidebar.markdown("### 👤 Configuración de Perfil")
-rol_usuario = st.sidebar.selectbox(
-    "Rol activo:",
-    ["👑 Administrador / Calidad", "👷 Operador / Planta"],
-    help="El Administrador/Calidad puede cambiar los estados de las observaciones registradas."
-)
-es_admin = rol_usuario == "👑 Administrador / Calidad"
-
 st.sidebar.divider()
 
 # ------------------------------------------
@@ -848,15 +896,12 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
     st.markdown("## 💬 Feedback & Bitácora de Cambios de Recetas")
     st.caption("Canal directo entre Planta, Control de Calidad y Chefs Ejecutivos.")
 
-    # Inicializar estructuras en memoria si no existen
     if "comentarios_locales" not in st.session_state:
         st.session_state["comentarios_locales"] = []
     if "estados_editados" not in st.session_state:
-        # Formato { id_unico: nuevo_estado }
         st.session_state["estados_editados"] = {}
 
     try:
-        # Cargar lista de productos N3
         df_lista_n3 = cargar_pestaña("Lista_N3")
         col_nom_n3 = df_lista_n3.columns[0]
         col_cod_n3 = df_lista_n3.columns[1] if len(df_lista_n3.columns) > 1 else col_nom_n3
@@ -867,11 +912,9 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
         )
         opciones_n3 = sorted([op for op in df_lista_n3["COMBO_LABEL"].unique() if len(op) > 4])
 
-        # Cargar la pestaña de Comentarios desde Google Sheets
         df_comentarios_sheet = cargar_pestaña("Comentarios_N3")
         df_comentarios_sheet.columns = [str(c).upper().strip() for c in df_comentarios_sheet.columns]
 
-        # Selección del Producto / Receta
         prod_sel = st.selectbox("🔍 Selecciona la Receta / Producto N3:", opciones_n3)
 
         if prod_sel:
@@ -895,37 +938,49 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
                 st.markdown("---")
                 st.markdown("#### ✍️ Registrar Nueva Observación")
                 
-                with st.form("form_nuevo_comentario", clear_on_submit=True):
-                    usuario_input = st.text_input("👤 Tu Nombre / Área:", placeholder="Ej: Ever (Calidad)")
-                    comentario_input = st.text_area("📝 Observación o Sugerencia:", placeholder="Escribe aquí el detalle...")
-                    
-                    btn_guardar = st.form_submit_button("💾 Emitir Observación", use_container_width=True)
-                    
-                    if btn_guardar:
-                        if not usuario_input.strip() or not comentario_input.strip():
-                            st.error("⚠️ Por favor completa tu nombre y el comentario antes de guardar.")
-                        else:
-                            fecha_actual = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-                            id_nuevo = f"loc_{len(st.session_state['comentarios_locales']) + 1}_{int(datetime.datetime.now().timestamp())}"
-                            
-                            # Toda observación nueva entra obligatoriamente como PENDIENTE
-                            nuevo_reg = {
-                                "ID": id_nuevo,
-                                "CODIGO": str(codigo_receta).upper().strip(),
-                                "RECETA": nombre_receta,
-                                "USUARIO": usuario_input,
-                                "FECHA": fecha_actual,
-                                "COMENTARIO": comentario_input,
-                                "ESTADO": "PENDIENTE"
-                            }
-                            st.session_state["comentarios_locales"].insert(0, nuevo_reg)
-                            st.success(f"✅ ¡Observación enviada como **PENDIENTE** para [{codigo_receta}]!")
-                            st.rerun()
+                mail_actual = st.session_state.get("usuario_mail", "").lower()
+                datos_u = usuarios_registrados.get(mail_actual, {})
+                
+                nombre_u = datos_u.get("nombre", mail_actual)
+                rol_u = datos_u.get("rol", "SOLO LECTURA")
+
+                es_admin = rol_u == "ADMINISTRADOR"
+                es_operador = rol_u in ["OPERADOR", "ADMINISTRADOR"]
+
+                if not mail_actual:
+                    st.warning("🔒 Debes **Iniciar Sesión** en la barra lateral con tu correo corporativo para emitir observaciones.")
+                elif not es_operador:
+                    st.error(f"🚫 El correo `{mail_actual}` no está registrado en la pestaña **Usuarios_Autorizados**.")
+                else:
+                    with st.form("form_nuevo_comentario", clear_on_submit=True):
+                        st.text_input("👤 Registrado por:", value=f"{nombre_u} ({mail_actual})", disabled=True)
+                        comentario_input = st.text_area("📝 Observación o Sugerencia:", placeholder="Escribe aquí el detalle...")
+                        
+                        btn_guardar = st.form_submit_button("💾 Emitir Observación", use_container_width=True)
+                        
+                        if btn_guardar:
+                            if not comentario_input.strip():
+                                st.error("⚠️ El comentario no puede estar vacío.")
+                            else:
+                                fecha_actual = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                                id_nuevo = f"loc_{len(st.session_state['comentarios_locales']) + 1}_{int(datetime.datetime.now().timestamp())}"
+                                
+                                nuevo_reg = {
+                                    "ID": id_nuevo,
+                                    "CODIGO": str(codigo_receta).upper().strip(),
+                                    "RECETA": nombre_receta,
+                                    "USUARIO": f"{nombre_u} ({mail_actual})",
+                                    "FECHA": fecha_actual,
+                                    "COMENTARIO": comentario_input,
+                                    "ESTADO": "PENDIENTE"
+                                }
+                                st.session_state["comentarios_locales"].insert(0, nuevo_reg)
+                                st.success(f"✅ Observación registrada como PENDIENTE por **{nombre_u}**.")
+                                st.rerun()
 
             with col_chat:
                 st.markdown("### 💬 Historial de Observaciones")
 
-                # 1. Cargar comentarios existentes desde Google Sheets
                 list_comb = []
                 if not df_comentarios_sheet.empty and "CODIGO" in df_comentarios_sheet.columns:
                     mask_codigo = df_comentarios_sheet["CODIGO"].astype(str).str.upper().str.strip() == str(codigo_receta).upper().strip()
@@ -940,15 +995,12 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
                             "FECHA": r.get("FECHA", "")
                         })
 
-                # 2. Cargar comentarios recién creados en la sesión local
                 locales_prod = [
                     c for c in st.session_state["comentarios_locales"] 
                     if c["CODIGO"] == str(codigo_receta).upper().strip()
                 ]
 
-                # 3. Combinar ambos (los locales arriba)
                 todos_comentarios = locales_prod + list_comb
-
                 lista_opciones_estado = ["PENDIENTE", "LEÍDO", "EN EJECUCIÓN", "APROBADO", "RECHAZADO"]
 
                 def render_badge(estado):
@@ -962,7 +1014,6 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
                     bg, fg, ico = colores.get(str(estado).upper().strip(), ("#E5E7EB", "#374151", "📌"))
                     return f'<span style="background-color:{bg}; color:{fg}; padding: 4px 10px; border-radius: 12px; font-weight: 600; font-size: 0.8rem;">{ico} {estado}</span>'
 
-                # Contenedor del Historial
                 chat_box = st.container(height=520)
                 with chat_box:
                     if not todos_comentarios:
@@ -970,8 +1021,6 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
                     else:
                         for item in todos_comentarios:
                             item_id = item["ID"]
-                            
-                            # Verificar si el estado fue modificado durante esta sesión
                             estado_actual = st.session_state["estados_editados"].get(item_id, item.get("ESTADO", "PENDIENTE"))
                             if str(estado_actual).strip() == "":
                                 estado_actual = "PENDIENTE"
@@ -980,7 +1029,6 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
                             comentario_txt = item.get("COMENTARIO", "")
                             fecha_txt = item.get("FECHA", "")
                             
-                            # Tarjeta contenedor del comentario
                             with st.container():
                                 st.markdown(f"""
                                 <div style="background-color: #FFFFFF; border: 1px solid #EBE5DF; border-radius: 8px; padding: 12px 14px 6px 14px; margin-bottom: 4px;">
@@ -992,7 +1040,7 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
                                 </div>
                                 """, unsafe_allow_html=True)
                                 
-                                # Si el usuario activo es ADMINISTRADOR / CALIDAD, puede modificar el estado
+                                # CONTROL DE PERMISOS: Solo Administradores pueden cambiar estados
                                 if es_admin:
                                     c_lbl, c_sel = st.columns([1, 2])
                                     with c_lbl:
@@ -1011,17 +1059,13 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
                                             label_visibility="collapsed"
                                         )
                                         
-                                        # Guardar el cambio si fue modificado
                                         if nuevo_st != estado_actual:
                                             st.session_state["estados_editados"][item_id] = nuevo_st
-                                            
-                                            # Actualizar también la lista de comentarios locales si aplica
                                             for loc in st.session_state["comentarios_locales"]:
                                                 if loc["ID"] == item_id:
                                                     loc["ESTADO"] = nuevo_st
                                             st.rerun()
                                 else:
-                                    # Para Operadores normales solo se muestra el estado fijo
                                     st.markdown(f"<div style='margin-bottom:12px;'>{render_badge(estado_actual)}</div>", unsafe_allow_html=True)
 
                                 st.markdown("<hr style='margin:10px 0; border:0; border-top:1px dashed #DDD;' />", unsafe_allow_html=True)
@@ -1037,6 +1081,7 @@ elif modo_app == "📖 Explorador de Tablas":
     pestaña_activa = st.sidebar.radio(
         "Selecciona la vista:",
         [
+            "Usuarios_Autorizados",
             "Recetas_N3",
             "Lista_N3",
             "Recetas_N2",
