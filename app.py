@@ -1104,7 +1104,7 @@ elif modo_app == "💬 Feedback por Producto (N3)":
         st.error(f"Error al cargar la bitácora de comentarios: {e}")
 
 # ------------------------------------------
-# MODO 5: BITÁCORA GENERAL DE OBSERVACIONES (NUEVO)
+# MODO 5: BITÁCORA GENERAL DE OBSERVACIONES
 # ------------------------------------------
 elif modo_app == "📌 Bitácora General de Observaciones":
     st.markdown("## 📌 Bitácora Centralizada de Observaciones")
@@ -1229,41 +1229,59 @@ elif modo_app == "📌 Bitácora General de Observaciones":
         st.error(f"Error al generar la Bitácora General: {e}")
 
 # ------------------------------------------
-# MODO 6: EXPLORADOR DE TABLAS
+# MODO 6: EXPLORADOR DE TABLAS (PROTEGIDO)
 # ------------------------------------------
 elif modo_app == "📖 Explorador de Tablas":
-    st.sidebar.header("📋 Pestañas del Recetario")
-    pestaña_activa = st.sidebar.radio(
-        "Selecciona la vista:",
-        [
-            "Usuarios_Autorizados",
-            "Recetas_N3",
-            "Lista_N3",
-            "Recetas_N2",
-            "Lista_N2",
-            "Recetas_N1",
-            "Lista_N1",
+    st.markdown("## 📖 Explorador Seguro de Tablas de Trabajo")
+    
+    mail_actual = st.session_state.get("usuario_mail", "").strip().lower()
+    datos_u = usuarios_registrados.get(mail_actual, {})
+    rol_u = str(datos_u.get("rol", "")).strip().upper()
+
+    es_autorizado = rol_u in ["OPERADOR", "ADMINISTRADOR", "OPERADOR AUTORIZADO"]
+
+    if not mail_actual:
+        st.error("🔒 **Acceso Restringido:** Debes **Iniciar Sesión** en el menú lateral para acceder a la exploración de tablas.")
+        st.info("👉 Si eres usuario Operador o Administrador, ingresa tu correo y PIN de acceso.")
+    elif not es_autorizado:
+        st.warning("⚠️ **Permisos Insuficientes:** Solo los usuarios con rol **OPERADOR** o **ADMINISTRADOR** pueden explorar directamente la estructura de las tablas de trabajo.")
+    else:
+        st.sidebar.header("📋 Tablas Operativas")
+        
+        # Lista exacta desde Materia_Prima hasta Recetas_N2 (excluyendo datos confidenciales de usuarios)
+        pestañas_permitidas = [
             "Materia_Prima",
             "Mermas_Costos",
+            "Lista_N1",
+            "Recetas_N1",
+            "Lista_N2",
+            "Recetas_N2",
+            "Lista_N3",
+            "Recetas_N3",
             "Comentarios_N3",
-        ],
-    )
-    try:
-        with st.spinner(f"Cargando {pestaña_activa}..."):
-            df = cargar_pestaña(pestaña_activa)
+        ]
 
-        st.subheader(f"📖 Vista de Datos: {pestaña_activa}")
-        busqueda = st.text_input(f"🔍 Buscar en {pestaña_activa}:")
+        pestaña_activa = st.sidebar.radio("Selecciona la vista:", pestañas_permitidas)
+        
+        try:
+            with st.spinner(f"Cargando {pestaña_activa}..."):
+                df = cargar_pestaña(pestaña_activa)
 
-        if busqueda:
-            mascara = df.apply(
-                lambda row: row.astype(str).str.contains(busqueda, case=False, na=False).any(),
-                axis=1,
-            )
-            df_filtrado = df[mascara]
-            st.success(f"Se encontraron **{len(df_filtrado)}** resultados")
-            st.dataframe(df_filtrado, use_container_width=True)
-        else:
-            st.dataframe(df, use_container_width=True)
-    except Exception as e:
-        st.error(f"Error al cargar {pestaña_activa}: {e}")
+            st.subheader(f"📋 Pestaña Actual: `{pestaña_activa}`")
+            st.caption(f"Mostrando datos en tiempo real de la pestaña **{pestaña_activa}**.")
+
+            busqueda = st.text_input(f"🔍 Buscar en {pestaña_activa}:")
+
+            if busqueda:
+                mascara = df.apply(
+                    lambda row: row.astype(str).str.contains(busqueda, case=False, na=False).any(),
+                    axis=1,
+                )
+                df_filtrado = df[mascara]
+                st.success(f"Se encontraron **{len(df_filtrado)}** registros coincidentes.")
+                st.dataframe(df_filtrado, use_container_width=True)
+            else:
+                st.dataframe(df, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"Error al cargar la pestaña {pestaña_activa}: {e}")
