@@ -78,7 +78,7 @@ st.markdown(
     """
     <div class="header-fridolin">
         <h1>Fridolin • Centro de Control & Simulación Multinivel</h1>
-        <p>Gestión Inteligente de Recetas N1, N2 y N3 • Análisis de Impacto Financiero</p>
+        <p>Gestión Inteligente de Recetas N1, N2 y N3 • Análisis de Impacto Financiero & Bitácora</p>
     </div>
 """,
     unsafe_allow_html=True,
@@ -221,14 +221,13 @@ def obtener_precios_y_costo_n3(row_n3):
     return costo, pv1, pv2, pv3
 
 
-# EXTRAER COMPONENTES DE RECETAS N3 (MATERIA PRIMA, RECETAS N1, RECETAS N2)
 def extraer_componentes_por_columnas(filas_receta):
     mp_list = []
     n1_list = []
     n2_list = []
 
     for _, row in filas_receta.iterrows():
-        # --- MATERIA PRIMA DIRECTA ---
+        # MATERIA PRIMA DIRECTA
         if len(row) > 1 and str(row.iloc[1]).strip() not in ["", "-", "NADA", "nan"]:
             nom_mp = str(row.iloc[1]).strip()
             cod_mp = limpiar_cod_mostrar(row.iloc[2]) if len(row) > 2 else ""
@@ -243,7 +242,7 @@ def extraer_componentes_por_columnas(filas_receta):
                     "Unidad": unid_mp
                 })
 
-        # --- RECETAS N1 ---
+        # RECETAS N1
         if len(row) > 6 and str(row.iloc[6]).strip() not in ["", "-", "NADA", "nan"]:
             nom_n1 = str(row.iloc[6]).strip()
             cod_n1 = limpiar_cod_mostrar(row.iloc[7]) if len(row) > 7 else ""
@@ -258,7 +257,7 @@ def extraer_componentes_por_columnas(filas_receta):
                     "unidad": unid_n1
                 })
 
-        # --- RECETAS N2 (SOLO DATOS PARA TABLA DIRECTA) ---
+        # RECETAS N2
         if len(row) > 10 and str(row.iloc[10]).strip() not in ["", "-", "NADA", "nan"]:
             nom_n2 = str(row.iloc[10]).strip()
             cod_n2 = limpiar_cod_mostrar(row.iloc[11]) if len(row) > 11 else ""
@@ -286,6 +285,7 @@ modo_app = st.sidebar.radio(
         "📋 Ficha Técnica de Producto (N3)",
         "📊 Control de Márgenes y Estados (N3)",
         "🍰 Simulación Financiera Multinivel",
+        "💬 Feedback & Historial de Recetas (N3)",
         "📖 Explorador de Tablas",
     ],
 )
@@ -325,7 +325,6 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
             st.divider()
             st.markdown(f"### 🎂 {nombre_p} <small style='color:#777;'>(Código ERP: {codigo_p})</small>", unsafe_allow_html=True)
 
-            # --- MÉTRICAS ---
             st.markdown("##### 💵 Análisis de Costo & Márgenes")
             m1, m2, m3, m4 = st.columns(4)
 
@@ -355,7 +354,6 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
 
             st.divider()
 
-            # --- ESTRUCTURA DE LA RECETA ---
             st.markdown("##### 📦 Estructura del Producto")
 
             filas_r3 = df_recetas_n3[
@@ -369,7 +367,6 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
             if not filas_r3.empty:
                 materia_prima_list, recetas_n1_list, recetas_n2_list = extraer_componentes_por_columnas(filas_r3)
 
-                # 1. MATERIA PRIMA DIRECTA
                 with st.expander(f"🔹 **Materia Prima Directa** ({len(materia_prima_list)} insumos)", expanded=True):
                     if materia_prima_list:
                         df_mp = pd.DataFrame(materia_prima_list)
@@ -377,7 +374,6 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
                     else:
                         st.write("No contiene Materia Prima directa.")
 
-                # 2. RECETAS N2 (INTERMEDIOS / RELLENOS) - COMO TABLA DIRECTA SIN DESGLOSE
                 with st.expander(f"🟠 **Recetas N2 (Intermedios / Rellenos)** ({len(recetas_n2_list)} componentes)", expanded=True):
                     if recetas_n2_list:
                         df_n2 = pd.DataFrame(recetas_n2_list)
@@ -385,7 +381,6 @@ if modo_app == "📋 Ficha Técnica de Producto (N3)":
                     else:
                         st.write("No contiene Recetas N2.")
 
-                # 3. RECETAS N1 (SUB-RECETAS) - MANTENIENDO DESGLOSE
                 if recetas_n1_list:
                     st.markdown("##### 🔴 Recetas N1 (Sub-Recetas Base)")
                     for item_n1 in recetas_n1_list:
@@ -835,7 +830,103 @@ elif modo_app == "🍰 Simulación Financiera Multinivel":
         st.error(f"Error en simulación: {e}")
 
 # ------------------------------------------
-# MODO 4: EXPLORADOR DE TABLAS
+# MODO 4: FEEDBACK & HISTORIAL DE RECETAS (N3)
+# ------------------------------------------
+elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
+    st.markdown("## 💬 Feedback & Bitácora de Cambios de Recetas")
+    st.caption("Canal directo entre Planta, Control de Calidad y Chefs Ejecutivos.")
+
+    try:
+        # Cargar lista de productos N3
+        df_lista_n3 = cargar_pestaña("Lista_N3")
+        col_nom_n3 = df_lista_n3.columns[0]
+        col_cod_n3 = df_lista_n3.columns[1] if len(df_lista_n3.columns) > 1 else col_nom_n3
+
+        df_lista_n3["COD_RAW"] = df_lista_n3[col_cod_n3].apply(limpiar_cod_mostrar)
+        df_lista_n3["COMBO_LABEL"] = (
+            "[" + df_lista_n3["COD_RAW"] + "] " + df_lista_n3[col_nom_n3].astype(str).str.strip()
+        )
+        opciones_n3 = sorted([op for op in df_lista_n3["COMBO_LABEL"].unique() if len(op) > 4])
+
+        # Cargar la pestaña de Comentarios desde Google Sheets
+        df_comentarios = cargar_pestaña("Comentarios_N3")
+        
+        # Normalizar nombres de columnas por seguridad
+        df_comentarios.columns = [str(c).upper().strip() for c in df_comentarios.columns]
+
+        # Selección del Producto / Receta
+        prod_sel = st.selectbox("🔍 Selecciona la Receta / Producto N3:", opciones_n3)
+
+        if prod_sel:
+            fila_p = df_lista_n3[df_lista_n3["COMBO_LABEL"] == prod_sel].iloc[0]
+            nombre_receta = str(fila_p[col_nom_n3]).strip()
+            codigo_receta = fila_p["COD_RAW"]
+
+            st.markdown("---")
+            col_info, col_chat = st.columns([1, 1])
+
+            with col_info:
+                st.markdown(f"### 📋 Ficha de Control: {nombre_receta}")
+                st.markdown(f"**Código ERP:** `{codigo_receta}`")
+                
+                costo_r3, pv1, pv2, _ = obtener_precios_y_costo_n3(fila_p)
+                
+                i1, i2 = st.columns(2)
+                i1.metric("Costo R3 Actual", f"Bs {costo_r3:.2f}")
+                i2.metric("Precio Venta 1", f"Bs {pv1:.2f}" if pv1 > 0 else "N/A")
+
+                st.info("💡 En el panel de la derecha se filtran automáticamente las observaciones vinculadas al código ERP de este producto.")
+
+            with col_chat:
+                st.markdown("### 💬 Historial de Observaciones")
+
+                # Filtrar comentarios comparando por CÓDIGO de receta (Columna B)
+                if not df_comentarios.empty and "CODIGO" in df_comentarios.columns:
+                    mask_codigo = df_comentarios["CODIGO"].astype(str).str.upper().str.strip() == str(codigo_receta).upper().strip()
+                    comentarios_filtrados = df_comentarios[mask_codigo]
+                else:
+                    comentarios_filtrados = pd.DataFrame()
+
+                # Función para badges de estado
+                def render_badge(estado):
+                    colores = {
+                        "PENDIENTE": ("#FEF3C7", "#92400E", "⏳"),
+                        "LEÍDO": ("#E0F2FE", "#075985", "👀"),
+                        "EN EJECUCIÓN": ("#DBEAFE", "#1E40AF", "⚙️"),
+                        "APROBADO": ("#DCFCE7", "#166534", "✅"),
+                        "RECHAZADO": ("#FEE2E2", "#991B1B", "❌"),
+                    }
+                    bg, fg, ico = colores.get(str(estado).upper().strip(), ("#E5E7EB", "#374151", "📌"))
+                    return f'<span style="background-color:{bg}; color:{fg}; padding: 3px 8px; border-radius: 10px; font-weight: 600; font-size: 0.78rem;">{ico} {estado}</span>'
+
+                # Contenedor visual del Historial
+                chat_box = st.container(height=380)
+                with chat_box:
+                    if comentarios_filtrados.empty:
+                        st.write("🕒 *No hay comentarios o solicitudes registradas para esta receta.*")
+                    else:
+                        for _, row in comentarios_filtrados.iterrows():
+                            badge = render_badge(row.get("ESTADO", "Pendiente"))
+                            usuario_nom = row.get("USUARIO", "Anónimo")
+                            comentario_txt = row.get("COMENTARIO", "")
+                            fecha_txt = row.get("FECHA", "")
+                            
+                            st.markdown(f"""
+                            <div style="background-color: #FFFFFF; border: 1px solid #EBE5DF; border-radius: 8px; padding: 10px; margin-bottom: 10px;">
+                                <div style="display:flex; justify-content:space-between; align-items:center;">
+                                    <strong style="color: #8B1D2C;">👤 {usuario_nom}</strong>
+                                    {badge}
+                                </div>
+                                <p style="margin: 6px 0; font-size: 0.9rem; color: #333;">{comentario_txt}</p>
+                                <small style="color: #888; font-size: 0.75rem;">📅 {fecha_txt}</small>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+    except Exception as e:
+        st.error(f"Error al cargar la bitácora de comentarios: {e}")
+
+# ------------------------------------------
+# MODO 5: EXPLORADOR DE TABLAS
 # ------------------------------------------
 elif modo_app == "📖 Explorador de Tablas":
     st.sidebar.header("📋 Pestañas del Recetario")
@@ -850,6 +941,7 @@ elif modo_app == "📖 Explorador de Tablas":
             "Lista_N1",
             "Materia_Prima",
             "Mermas_Costos",
+            "Comentarios_N3",
         ],
     )
     try:
