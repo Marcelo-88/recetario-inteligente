@@ -358,7 +358,8 @@ modo_app = st.sidebar.radio(
         "📋 Ficha Técnica de Producto (N3)",
         "📊 Control de Márgenes y Estados (N3)",
         "🍰 Simulación Financiera Multinivel",
-        "💬 Feedback & Historial de Recetas (N3)",
+        "💬 Feedback por Producto (N3)",
+        "📌 Bitácora General de Observaciones",
         "📖 Explorador de Tablas",
     ],
 )
@@ -903,10 +904,10 @@ elif modo_app == "🍰 Simulación Financiera Multinivel":
         st.error(f"Error en simulación: {e}")
 
 # ------------------------------------------
-# MODO 4: FEEDBACK & HISTORIAL DE RECETAS (N3)
+# MODO 4: FEEDBACK POR PRODUCTO (N3)
 # ------------------------------------------
-elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
-    st.markdown("## 💬 Feedback & Bitácora de Cambios de Recetas")
+elif modo_app == "💬 Feedback por Producto (N3)":
+    st.markdown("## 💬 Feedback & Bitácora de Cambios por Producto")
     st.caption("Canal directo entre Planta, Control de Calidad y Chefs Ejecutivos.")
 
     if "comentarios_locales" not in st.session_state:
@@ -969,7 +970,6 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
                     datos_u = usuarios_registrados.get(mail_actual, {})
                     nombre_u = datos_u.get("nombre", mail_actual.split("@")[0].capitalize())
 
-                    # FORMULARIO CORREGIDO SIN BLOQUEOS
                     with st.form(key="form_emision_observacion", clear_on_submit=True):
                         st.text_input(
                             "👤 Registrado por:", 
@@ -1019,6 +1019,8 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
                         id_sheet = f"sheet_{idx_s}"
                         list_comb.append({
                             "ID": id_sheet,
+                            "CODIGO": r.get("CODIGO", codigo_receta),
+                            "RECETA": r.get("RECETA", nombre_receta),
                             "USUARIO": r.get("USUARIO", "Anónimo"),
                             "ESTADO": r.get("ESTADO", "PENDIENTE"),
                             "COMENTARIO": r.get("COMENTARIO", ""),
@@ -1102,7 +1104,132 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
         st.error(f"Error al cargar la bitácora de comentarios: {e}")
 
 # ------------------------------------------
-# MODO 5: EXPLORADOR DE TABLAS
+# MODO 5: BITÁCORA GENERAL DE OBSERVACIONES (NUEVO)
+# ------------------------------------------
+elif modo_app == "📌 Bitácora General de Observaciones":
+    st.markdown("## 📌 Bitácora Centralizada de Observaciones")
+    st.caption("Consolidado global de todas las observaciones generadas, estado, autor y producto asociado.")
+
+    if "comentarios_locales" not in st.session_state:
+        st.session_state["comentarios_locales"] = []
+    if "estados_editados" not in st.session_state:
+        st.session_state["estados_editados"] = {}
+
+    try:
+        df_comentarios_sheet = cargar_pestaña("Comentarios_N3")
+        df_comentarios_sheet.columns = [str(c).upper().strip() for c in df_comentarios_sheet.columns]
+
+        lista_consolidada = []
+
+        # 1. Observaciones Locales (Sesión Actual)
+        for loc in st.session_state["comentarios_locales"]:
+            est_actual = st.session_state["estados_editados"].get(loc["ID"], loc.get("ESTADO", "PENDIENTE"))
+            lista_consolidada.append({
+                "Código ERP": loc.get("CODIGO", "-"),
+                "Producto Terminado": loc.get("RECETA", "Producto Desconocido"),
+                "Usuario / Emisor": loc.get("USUARIO", "Anónimo"),
+                "Fecha": loc.get("FECHA", "-"),
+                "Observación": loc.get("COMENTARIO", ""),
+                "Estado": est_actual if est_actual else "PENDIENTE"
+            })
+
+        # 2. Observaciones de la Hoja de Cálculo
+        if not df_comentarios_sheet.empty:
+            for idx_s, r in df_comentarios_sheet.iterrows():
+                id_sheet = f"sheet_{idx_s}"
+                est_actual = st.session_state["estados_editados"].get(id_sheet, r.get("ESTADO", "PENDIENTE"))
+                if not str(est_actual).strip():
+                    est_actual = "PENDIENTE"
+
+                lista_consolidada.append({
+                    "Código ERP": r.get("CODIGO", "-"),
+                    "Producto Terminado": r.get("RECETA", "Producto Desconocido"),
+                    "Usuario / Emisor": r.get("USUARIO", "Anónimo"),
+                    "Fecha": r.get("FECHA", "-"),
+                    "Observación": r.get("COMENTARIO", ""),
+                    "Estado": est_actual
+                })
+
+        df_todas_obs = pd.DataFrame(lista_consolidada)
+
+        if df_todas_obs.empty:
+            st.info("ℹ️ No hay ninguna observación registrada hasta el momento.")
+        else:
+            # Filtros en 3 columnas
+            f_col1, f_col2, f_col3 = st.columns([1, 1, 2])
+            
+            estados_unicos = sorted(list(df_todas_obs["Estado"].dropna().unique()))
+            usuarios_unicos = sorted(list(df_todas_obs["Usuario / Emisor"].dropna().unique()))
+
+            with f_col1:
+                filtro_estados = st.multiselect("📌 Filtrar por Estado:", estados_unicos, default=estados_unicos)
+            with f_col2:
+                filtro_usuarios = st.multiselect("👤 Filtrar por Usuario:", usuarios_unicos, default=usuarios_unicos)
+            with f_col3:
+                filtro_busqueda = st.text_input("🔍 Buscar por Producto, Código u Observación:")
+
+            # Aplicar filtros
+            df_filtrado = df_todas_obs.copy()
+
+            if filtro_estados:
+                df_filtrado = df_filtrado[df_filtrado["Estado"].isin(filtro_estados)]
+
+            if filtro_usuarios:
+                df_filtrado = df_filtrado[df_filtrado["Usuario / Emisor"].isin(filtro_usuarios)]
+
+            if filtro_busqueda:
+                b_low = filtro_busqueda.lower()
+                df_filtrado = df_filtrado[
+                    df_filtrado["Producto Terminado"].astype(str).str.lower().str.contains(b_low) |
+                    df_filtrado["Código ERP"].astype(str).str.lower().str.contains(b_low) |
+                    df_filtrado["Observación"].astype(str).str.lower().str.contains(b_low) |
+                    df_filtrado["Usuario / Emisor"].astype(str).str.lower().str.contains(b_low)
+                ]
+
+            st.divider()
+
+            # Métricas rápidas
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Total Observaciones", len(df_filtrado))
+            m2.metric("Pendientes", len(df_filtrado[df_filtrado["Estado"] == "PENDIENTE"]))
+            m3.metric("En Ejecución", len(df_filtrado[df_filtrado["Estado"] == "EN EJECUCIÓN"]))
+            m4.metric("Aprobadas", len(df_filtrado[df_filtrado["Estado"] == "APROBADO"]))
+
+            st.divider()
+
+            # Formato condicional del Estado en la tabla
+            def colorear_estado(val):
+                v = str(val).upper().strip()
+                if v == "PENDIENTE":
+                    return "background-color: #FEF3C7; color: #92400E; font-weight: bold;"
+                elif v == "LEÍDO":
+                    return "background-color: #E0F2FE; color: #075985; font-weight: bold;"
+                elif v == "EN EJECUCIÓN":
+                    return "background-color: #DBEAFE; color: #1E40AF; font-weight: bold;"
+                elif v == "APROBADO":
+                    return "background-color: #DCFCE7; color: #166534; font-weight: bold;"
+                elif v == "RECHAZADO":
+                    return "background-color: #FEE2E2; color: #991B1B; font-weight: bold;"
+                return ""
+
+            styler_obs = df_filtrado.style
+            if hasattr(styler_obs, "map"):
+                styler_obs = styler_obs.map(colorear_estado, subset=["Estado"])
+            else:
+                styler_obs = styler_obs.applymap(colorear_estado, subset=["Estado"])
+
+            st.dataframe(
+                styler_obs,
+                use_container_width=True,
+                height=550,
+                hide_index=True
+            )
+
+    except Exception as e:
+        st.error(f"Error al generar la Bitácora General: {e}")
+
+# ------------------------------------------
+# MODO 6: EXPLORADOR DE TABLAS
 # ------------------------------------------
 elif modo_app == "📖 Explorador de Tablas":
     st.sidebar.header("📋 Pestañas del Recetario")
