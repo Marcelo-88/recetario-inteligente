@@ -837,6 +837,10 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
     st.markdown("## 💬 Feedback & Bitácora de Cambios de Recetas")
     st.caption("Canal directo entre Planta, Control de Calidad y Chefs Ejecutivos.")
 
+    # Inicializar estado en memoria para guardar comentarios durante la sesión
+    if "comentarios_locales" not in st.session_state:
+        st.session_state["comentarios_locales"] = []
+
     try:
         # Cargar lista de productos N3
         df_lista_n3 = cargar_pestaña("Lista_N3")
@@ -850,8 +854,8 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
         opciones_n3 = sorted([op for op in df_lista_n3["COMBO_LABEL"].unique() if len(op) > 4])
 
         # Cargar la pestaña de Comentarios desde Google Sheets
-        df_comentarios = cargar_pestaña("Comentarios_N3")
-        df_comentarios.columns = [str(c).upper().strip() for c in df_comentarios.columns]
+        df_comentarios_sheet = cargar_pestaña("Comentarios_N3")
+        df_comentarios_sheet.columns = [str(c).upper().strip() for c in df_comentarios_sheet.columns]
 
         # Selección del Producto / Receta
         prod_sel = st.selectbox("🔍 Selecciona la Receta / Producto N3:", opciones_n3)
@@ -893,19 +897,44 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
                         else:
                             fecha_actual = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
                             
-                            st.success(f"✅ ¡Observación enviada correctamente para [{codigo_receta}]!")
-                            st.info(f"**Registrado:** [{fecha_actual}] {usuario_input} - {estado_input}: {comentario_input}")
-                            st.caption("💡 Recuerda ingresar este registro en tu pestaña `Comentarios_N3` para persistir la información visual.")
+                            # Insertar registro al inicio del listado en sesión
+                            nuevo_reg = {
+                                "CODIGO": str(codigo_receta).upper().strip(),
+                                "RECETA": nombre_receta,
+                                "USUARIO": usuario_input,
+                                "FECHA": fecha_actual,
+                                "COMENTARIO": comentario_input,
+                                "ESTADO": estado_input
+                            }
+                            st.session_state["comentarios_locales"].insert(0, nuevo_reg)
+                            
+                            st.success(f"✅ ¡Observación agregada con éxito para [{codigo_receta}]!")
+                            st.rerun()
 
             with col_chat:
                 st.markdown("### 💬 Historial de Observaciones")
 
-                # Filtrar comentarios comparando por CÓDIGO de receta
-                if not df_comentarios.empty and "CODIGO" in df_comentarios.columns:
-                    mask_codigo = df_comentarios["CODIGO"].astype(str).str.upper().str.strip() == str(codigo_receta).upper().strip()
-                    comentarios_filtrados = df_comentarios[mask_codigo]
-                else:
-                    comentarios_filtrados = pd.DataFrame()
+                # 1. Cargar comentarios existentes desde Google Sheets
+                list_comb = []
+                if not df_comentarios_sheet.empty and "CODIGO" in df_comentarios_sheet.columns:
+                    mask_codigo = df_comentarios_sheet["CODIGO"].astype(str).str.upper().str.strip() == str(codigo_receta).upper().strip()
+                    df_filtrado_sheet = df_comentarios_sheet[mask_codigo]
+                    for _, r in df_filtrado_sheet.iterrows():
+                        list_comb.append({
+                            "USUARIO": r.get("USUARIO", "Anónimo"),
+                            "ESTADO": r.get("ESTADO", "PENDIENTE"),
+                            "COMENTARIO": r.get("COMENTARIO", ""),
+                            "FECHA": r.get("FECHA", "")
+                        })
+
+                # 2. Cargar comentarios recién creados en la sesión local
+                locales_prod = [
+                    c for c in st.session_state["comentarios_locales"] 
+                    if c["CODIGO"] == str(codigo_receta).upper().strip()
+                ]
+
+                # 3. Combinar ambos (los locales aparecen primero arriba)
+                todos_comentarios = locales_prod + list_comb
 
                 def render_badge(estado):
                     colores = {
@@ -921,14 +950,14 @@ elif modo_app == "💬 Feedback & Historial de Recetas (N3)":
                 # Contenedor visual del Historial
                 chat_box = st.container(height=480)
                 with chat_box:
-                    if comentarios_filtrados.empty:
+                    if not todos_comentarios:
                         st.write("🕒 *No hay comentarios o solicitudes registradas para esta receta.*")
                     else:
-                        for _, row in comentarios_filtrados.iterrows():
-                            badge = render_badge(row.get("ESTADO", "Pendiente"))
-                            usuario_nom = row.get("USUARIO", "Anónimo")
-                            comentario_txt = row.get("COMENTARIO", "")
-                            fecha_txt = row.get("FECHA", "")
+                        for item in todos_comentarios:
+                            badge = render_badge(item.get("ESTADO", "PENDIENTE"))
+                            usuario_nom = item.get("USUARIO", "Anónimo")
+                            comentario_txt = item.get("COMENTARIO", "")
+                            fecha_txt = item.get("FECHA", "")
                             
                             st.markdown(f"""
                             <div style="background-color: #FFFFFF; border: 1px solid #EBE5DF; border-radius: 8px; padding: 12px; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
