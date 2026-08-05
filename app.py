@@ -1285,3 +1285,12 @@ elif modo_app == "📖 Explorador de Tablas":
 
         except Exception as e:
             st.error(f"Error al cargar la pestaña {pestaña_activa}: {e}")
+
+hide_streamlit_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
+            </style>
+            """
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
