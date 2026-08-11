@@ -658,7 +658,13 @@ elif modo_app == "🍰 Simulación Financiera Multinivel":
                 porc_inc = (
                     (dif_precio_unitario / costo_actual_unitario * 100) if costo_actual_unitario > 0 else 0.0
                 )
-                st.metric("Variación Directa", f"+Bs {dif_precio_unitario:.2f}", delta=f"{porc_inc:.1f}%")
+                
+                txt_signo_var = "+" if dif_precio_unitario >= 0 else "-"
+                st.metric(
+                    "Variación Directa", 
+                    f"{txt_signo_var}Bs {abs(dif_precio_unitario):.2f}", 
+                    delta=f"{porc_inc:+.1f}%"
+                )
 
             st.caption(f"📌 Costo Base Actual en Mermas: **Bs {costo_actual_unitario:.2f}**")
             st.divider()
@@ -724,13 +730,14 @@ elif modo_app == "🍰 Simulación Financiera Multinivel":
                 costo_base_kg, cod_show, nom_show = consultar_master_gen(df_lista_n1, key_n1, "1")
                 costo_sim_kg = costo_base_kg + var_kilo
                 porc_var = (var_kilo / costo_base_kg * 100) if costo_base_kg > 0 else 0.0
+                signo_v = "+" if var_kilo >= 0 else "-"
                 filas_n1.append({
                     "Código N1": cod_show,
                     "Nombre Sub-Receta": nom_show,
                     "Costo Actual / Kg": f"Bs {costo_base_kg:.2f}",
                     "Costo Simulado / Kg": f"Bs {costo_sim_kg:.2f}",
-                    "Variación / Kg (Bs)": f"+Bs {var_kilo:.2f}",
-                    "Variación (%)": f"+{porc_var:.1f}%",
+                    "Variación / Kg (Bs)": f"{signo_v}Bs {abs(var_kilo):.2f}",
+                    "Variación (%)": f"{porc_var:+.1f}%",
                 })
 
             # --- RECETAS N2 ---
@@ -773,7 +780,7 @@ elif modo_app == "🍰 Simulación Financiera Multinivel":
                                 break
                         inc_batch_n2 += cant_n1 * var_kilo_n1
 
-                if inc_batch_n2 > 0:
+                if abs(inc_batch_n2) > 1e-9:
                     rendimiento_batch_n2 = obtener_rendimiento_total_batch(vals)
                     var_por_kilo_n2 = inc_batch_n2 / rendimiento_batch_n2
                     impactos_n2_kilo[receta_padre_key] = (
@@ -785,13 +792,14 @@ elif modo_app == "🍰 Simulación Financiera Multinivel":
                 costo_base_kg, cod_show, nom_show = consultar_master_gen(df_lista_n2, key_n2, "2")
                 costo_sim_kg = costo_base_kg + var_kilo
                 porc_var = (var_kilo / costo_base_kg * 100) if costo_base_kg > 0 else 0.0
+                signo_v = "+" if var_kilo >= 0 else "-"
                 filas_n2.append({
                     "Código N2": cod_show,
                     "Nombre Intermedio": nom_show,
                     "Costo Actual / Kg": f"Bs {costo_base_kg:.2f}",
                     "Costo Simulado / Kg": f"Bs {costo_sim_kg:.2f}",
-                    "Variación / Kg (Bs)": f"+Bs {var_kilo:.2f}",
-                    "Variación (%)": f"+{porc_var:.1f}%",
+                    "Variación / Kg (Bs)": f"{signo_v}Bs {abs(var_kilo):.2f}",
+                    "Variación (%)": f"{porc_var:+.1f}%",
                 })
 
             # --- RECETAS N3 ---
@@ -849,20 +857,21 @@ elif modo_app == "🍰 Simulación Financiera Multinivel":
                                 break
                         inc_producto_final += cant_n2 * var_kilo_n2
 
-                if inc_producto_final > 0:
+                if abs(inc_producto_final) > 1e-9:
                     impactos_n3[nombre_o_cod_n3] = impactos_n3.get(nombre_o_cod_n3, 0.0) + inc_producto_final
 
             filas_n3 = []
             for nom_o_cod, inc_total in impactos_n3.items():
                 costo_base, cod_show, nom_show = consultar_master_gen(df_lista_n3, nom_o_cod, "3")
                 porc_var = (inc_total / costo_base * 100) if costo_base > 0 else 0.0
+                signo_v = "+" if inc_total >= 0 else "-"
                 filas_n3.append({
                     "Código Producto N3": cod_show,
                     "Nombre Producto Final": nom_show,
                     "Costo Actual (R3)": f"Bs {costo_base:.2f}",
                     "Costo Simulado": f"Bs {(costo_base + inc_total):.2f}",
-                    "Variación (Bs)": f"+Bs {inc_total:.2f}",
-                    "Variación (%)": f"+{porc_var:.1f}%",
+                    "Variación (Bs)": f"{signo_v}Bs {abs(inc_total):.2f}",
+                    "Variación (%)": f"{porc_var:+.1f}%",
                 })
 
             resumen_l1 = pd.DataFrame(filas_n1)
