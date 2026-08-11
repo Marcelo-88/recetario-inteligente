@@ -1269,7 +1269,6 @@ elif modo_app == "📖 Explorador de Tablas":
     else:
         st.sidebar.header("📋 Tablas Operativas")
         
-        # Pestañas permitidas excluyendo Materia_Prima (transacciones pesadas) y Usuarios (confidencial)
         pestañas_permitidas = [
             "Mermas_Costos",
             "Lista_N1",
@@ -1307,39 +1306,30 @@ elif modo_app == "📖 Explorador de Tablas":
             st.error(f"Error al cargar la pestaña {pestaña_activa}: {e}")
 
 # ------------------------------------------
-# MODO 7: ASISTENTE IA (GOOGLE GEMINI)
+# MODO 7: ASISTENTE IA (OPTIMIZADO CON CONTEXTO Y FALLBACK)
 # ------------------------------------------
 elif modo_app == "🤖 Asistente IA (Gemini)":
     st.markdown("## 🤖 Asistente Virtual Fridolin (Google Gemini)")
-    st.caption("Consulta dudas técnicas sobre recetas, rendimiento de insumos y costos.")
+    st.caption("Consulta inteligente con contexto real de Recetas N1, N2, N3 y Costos.")
 
-    # 1. Obtener API Key de Secrets o entrada manual
-    api_key_secret = ""
-    try:
-        if "GEMINI_API_KEY" in st.secrets:
-            api_key_secret = str(st.secrets["GEMINI_API_KEY"]).strip()
-        elif "gemini" in st.secrets and "api_key" in st.secrets["gemini"]:
-            api_key_secret = str(st.secrets["gemini"]["api_key"]).strip()
-    except Exception:
-        api_key_secret = ""
+    api_key_secret = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
 
     if "gemini_key_manual" not in st.session_state:
         st.session_state["gemini_key_manual"] = ""
 
-    with st.sidebar.expander("🔑 Configuración Gemini API", expanded=True):
+    with st.sidebar.expander("🔑 Configuración Gemini API"):
         if api_key_secret:
             st.success("✅ API Key detectada desde Secrets.")
             api_key_usar = api_key_secret
         else:
             st.info("Ingresa tu Google AI Studio API Key:")
-            api_key_input = st.text_input(
+            api_key_usar = st.text_input(
                 "API Key:",
                 value=st.session_state["gemini_key_manual"],
                 type="password",
                 placeholder="AIzaSy..."
             )
-            st.session_state["gemini_key_manual"] = api_key_input.strip()
-            api_key_usar = st.session_state["gemini_key_manual"]
+            st.session_state["gemini_key_manual"] = api_key_usar
 
     if not api_key_usar:
         st.warning("⚠️ **API Key requerida:** Para utilizar el asistente, ingresa tu API Key de Google Gemini en la barra lateral o en `secrets.toml`.")
@@ -1353,20 +1343,45 @@ elif modo_app == "🤖 Asistente IA (Gemini)":
     elif not GENAI_AVAILABLE:
         st.error("❌ La librería de Google GenAI no está instalada en el entorno Python. Agrega `google-genai` o `google-generativeai` a tu `requirements.txt`.")
     else:
+        # Cargar contexto general sintético del recetario
+        @st.cache_data(ttl=60)
+        def obtener_resumen_contexto():
+            try:
+                df_l3 = cargar_pestaña("Lista_N3")
+                df_l2 = cargar_pestaña("Lista_N2")
+                df_l1 = cargar_pestaña("Lista_N1")
+                df_m = cargar_pestaña("Mermas_Costos")
+                
+                prods_n3 = df_l3.iloc[:, 0].dropna().head(15).tolist() if not df_l3.empty else []
+                insumos = df_m.iloc[:, 0].dropna().head(15).tolist() if not df_m.empty else []
+
+                contexto_str = (
+                    f"Resumen de base de datos actual de Fridolin:\n"
+                    f"- Total Recetas N3 (Productos Terminados): {len(df_l3)}\n"
+                    f"- Muestra Productos N3: {', '.join(prods_n3[:8])}\n"
+                    f"- Total Recetas N2 (Intermedios): {len(df_l2)}\n"
+                    f"- Total Recetas N1 (Sub-recetas Base): {len(df_l1)}\n"
+                    f"- Total Insumos Mermas/Costos: {len(df_m)}\n"
+                    f"- Muestra Insumos: {', '.join(insumos[:8])}\n"
+                )
+                return contexto_str
+            except Exception:
+                return "Base de datos de recetas Fridolin activa."
+
+        resumen_datos = obtener_resumen_contexto()
+
         if "mensajes_ia" not in st.session_state:
             st.session_state["mensajes_ia"] = [
                 {
                     "role": "assistant",
-                    "content": "¡Hola! Soy el asistente inteligente de **Fridolin**. ¿En qué puedo ayudarte hoy con la gestión de tus recetas o costos?"
+                    "content": "¡Hola! Soy el asistente técnico de **Fridolin**. Tengo acceso al contexto de tus recetas N1, N2 y N3. ¿En qué consulta sobre rendimientos, insumos o costos puedo ayudarte hoy?"
                 }
             ]
 
-        # Mostrar historial de conversación
         for msg in st.session_state["mensajes_ia"]:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
-        # Entrada de prompt del usuario
         prompt = st.chat_input("Escribe tu consulta sobre recetas, productos o insumos...")
 
         if prompt:
@@ -1375,55 +1390,50 @@ elif modo_app == "🤖 Asistente IA (Gemini)":
                 st.markdown(prompt)
 
             with st.chat_message("assistant"):
-                with st.spinner("Pensando respuesta..."):
-                    texto_respuesta = ""
-                    error_ultimo = None
-                    
-                    # Modelos candidatos en orden de prioridad
-                    modelos_candidatos = [
-                        "gemini-2.0-flash",
-                        "gemini-1.5-flash",
-                        "gemini-1.5-flash-latest",
-                        "gemini-1.5-pro",
-                        "gemini-pro"
-                    ]
+                with st.spinner("Procesando consulta con Gemini..."):
+                    # Construir historial para memoria
+                    historial_formateado = ""
+                    for m in st.session_state["mensajes_ia"][-6:]:
+                        r = "Usuario" if m["role"] == "user" else "Asistente"
+                        historial_formateado += f"\n{r}: {m['content']}"
 
                     system_prompt = (
-                        "Eres el asistente virtual especializado del Centro de Control de Recetas de Fridolin. "
-                        "Respondes con precisión, tono profesional y amigable. Ayudas en la gestión de materias primas, "
-                        "estructuras de recetas multinivel (N1 sub-recetas, N2 intermedios, N3 productos finales) y costos."
+                        "Eres el asistente virtual especializado del Centro de Control de Recetas de Fridolin (Santa Cruz, Bolivia). "
+                        "Respondes con precisión técnica, tono profesional y amigable. Ayudas en la gestión de materias primas, "
+                        "estructuras de recetas multinivel (N1 sub-recetas, N2 intermedios, N3 productos finales) y costos.\n\n"
+                        f"CONTEXTO DE DATOS:\n{resumen_datos}\n\n"
+                        f"HISTORIAL RECIENTE:{historial_formateado}\n\n"
+                        f"Consulta actual: {prompt}"
                     )
-                    prompt_completo = f"{system_prompt}\n\nConsulta del usuario: {prompt}"
 
-                    if GENAI_AVAILABLE == "new":
-                        client = genai.Client(api_key=api_key_usar)
-                        for mod in modelos_candidatos:
-                            try:
+                    modelos_probar = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+                    texto_respuesta = ""
+
+                    for mod_name in modelos_probar:
+                        try:
+                            if GENAI_AVAILABLE == "new":
+                                client = genai.Client(api_key=api_key_usar)
                                 response = client.models.generate_content(
-                                    model=mod,
-                                    contents=prompt_completo
+                                    model=mod_name,
+                                    contents=system_prompt
                                 )
                                 texto_respuesta = response.text
-                                break
-                            except Exception as e_m:
-                                error_ultimo = e_m
-                    else:
-                        genai.configure(api_key=api_key_usar)
-                        for mod in modelos_candidatos:
-                            try:
-                                model = genai.GenerativeModel(mod)
-                                response = model.generate_content(prompt_completo)
+                            else:
+                                genai.configure(api_key=api_key_usar)
+                                model = genai.GenerativeModel(mod_name)
+                                response = model.generate_content(system_prompt)
                                 texto_respuesta = response.text
-                                break
-                            except Exception as e_m:
-                                error_ultimo = e_m
 
-                    if texto_respuesta:
-                        st.markdown(texto_respuesta)
-                        st.session_state["mensajes_ia"].append({"role": "assistant", "content": texto_respuesta})
-                    else:
-                        err_msg = f"Error al comunicar con Google Gemini: {error_ultimo}"
-                        st.error(err_msg)
+                            if texto_respuesta:
+                                break
+                        except Exception:
+                            continue
+
+                    if not texto_respuesta:
+                        texto_respuesta = "⚠️ No fue posible obtener respuesta con ninguno de los modelos disponibles (`gemini-2.5-flash`, `gemini-2.0-flash`, `gemini-1.5-flash`). Por favor, verifica tu API Key."
+
+                    st.markdown(texto_respuesta)
+                    st.session_state["mensajes_ia"].append({"role": "assistant", "content": texto_respuesta})
 
 hide_streamlit_style = """
             <style>
