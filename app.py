@@ -1313,86 +1313,99 @@ elif modo_app == "🤖 Asistente IA (Gemini)":
     st.markdown("## 🤖 Asistente Virtual Fridolin (Google Gemini)")
     st.caption("Consulta dudas técnicas sobre recetas, rendimiento de insumos y costos.")
 
-    mail_actual = st.session_state.get("usuario_mail", "").strip().lower()
+    # 1. Obtener API Key de Secrets o entrada manual
+    api_key_secret = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
 
-    if not mail_actual:
-        st.error("🔒 **Acceso Restringido:** Debes **Iniciar Sesión** en la barra lateral para utilizar el Asistente IA.")
-        st.info("👉 Por favor ingresa tu correo corporativo y PIN en el menú lateral.")
+    if "gemini_key_manual" not in st.session_state:
+        st.session_state["gemini_key_manual"] = ""
+
+    with st.sidebar.expander("🔑 Configuración Gemini API"):
+        if api_key_secret:
+            st.success("✅ API Key detectada desde Secrets.")
+            api_key_usar = api_key_secret
+        else:
+            st.info("Ingresa tu Google AI Studio API Key:")
+            api_key_usar = st.text_input(
+                "API Key:",
+                value=st.session_state["gemini_key_manual"],
+                type="password",
+                placeholder="AIzaSy..."
+            )
+            st.session_state["gemini_key_manual"] = api_key_usar
+
+    if not api_key_usar:
+        st.warning("⚠️ **API Key requerida:** Para utilizar el asistente, ingresa tu API Key de Google Gemini en la barra lateral o en `secrets.toml`.")
+        st.markdown("""
+            **¿Cómo obtener tu API Key gratuita de Google?**
+            1. Ve a [Google AI Studio](https://aistudio.google.com/).
+            2. Inicia sesión con tu cuenta de Google.
+            3. Haz clic en **Create API key** y copia la clave generada.
+            4. Pegala en el panel de la izquierda en **Configuración Gemini API**.
+        """)
     elif not GENAI_AVAILABLE:
         st.error("❌ La librería de Google GenAI no está instalada en el entorno Python. Agrega `google-genai` o `google-generativeai` a tu `requirements.txt`.")
     else:
-        # Intentar obtener la clave directamente desde Secrets o desde session_state si se ingresó previamente
-        api_key_usar = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
-        
-        if not api_key_usar and "gemini_key_manual" in st.session_state:
-            api_key_usar = st.session_state["gemini_key_manual"]
+        if "mensajes_ia" not in st.session_state:
+            st.session_state["mensajes_ia"] = [
+                {
+                    "role": "assistant",
+                    "content": "¡Hola! Soy el asistente inteligente de **Fridolin**. ¿En qué puedo ayudarte hoy con la gestión de tus recetas o costos?"
+                }
+            ]
 
-        # Si no hay clave en Secrets ni en session state, desplegar campo secundario en sidebar
-        if not api_key_usar:
-            with st.sidebar.expander("🔑 Configuración Gemini API", expanded=True):
-                key_manual = st.text_input(
-                    "API Key de Gemini:",
-                    type="password",
-                    placeholder="AIzaSy..."
-                )
-                if key_manual:
-                    st.session_state["gemini_key_manual"] = key_manual
-                    st.rerun()
+        # Mostrar historial de conversación
+        for msg in st.session_state["mensajes_ia"]:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
 
-        if not api_key_usar:
-            st.warning("⚠️ **API Key requerida:** No se detectó la clave `GEMINI_API_KEY` en `secrets.toml`. Configúrala o ingrésala en el panel lateral.")
-        else:
-            if "mensajes_ia" not in st.session_state:
-                st.session_state["mensajes_ia"] = [
-                    {
-                        "role": "assistant",
-                        "content": "¡Hola! Soy el asistente inteligente de **Fridolin**. ¿En qué puedo ayudarte hoy con la gestión de tus recetas o costos?"
-                    }
-                ]
+        # Entrada de prompt del usuario
+        prompt = st.chat_input("Escribe tu consulta sobre recetas, productos o insumos...")
 
-            # Mostrar historial de conversación
-            for msg in st.session_state["mensajes_ia"]:
-                with st.chat_message(msg["role"]):
-                    st.markdown(msg["content"])
+        if prompt:
+            st.session_state["mensajes_ia"].append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
 
-            # Entrada de prompt del usuario
-            prompt = st.chat_input("Escribe tu consulta sobre recetas, productos o insumos...")
+            with st.chat_message("assistant"):
+                with st.spinner("Pensando respuesta..."):
+                    try:
+                        system_prompt = (
+                            "Eres el asistente virtual especializado del Centro de Control de Recetas de Fridolin. "
+                            "Respondes con precisión, tono profesional y amigable. Ayudas en la gestión de materias primas, "
+                            "estructuras de recetas multinivel (N1 sub-recetas, N2 intermedios, N3 productos finales) y costos."
+                        )
+                        prompt_completo = f"{system_prompt}\n\nConsulta del usuario: {prompt}"
 
-            if prompt:
-                st.session_state["mensajes_ia"].append({"role": "user", "content": prompt})
-                with st.chat_message("user"):
-                    st.markdown(prompt)
-
-                with st.chat_message("assistant"):
-                    with st.spinner("Pensando respuesta..."):
-                        try:
-                            system_prompt = (
-                                "Eres el asistente virtual especializado del Centro de Control de Recetas de Fridolin. "
-                                "Respondes con precisión, tono profesional y amigable. Ayudas en la gestión de materias primas, "
-                                "estructuras de recetas multinivel (N1 sub-recetas, N2 intermedios, N3 productos finales) y costos."
-                            )
-
-                            if GENAI_AVAILABLE == "new":
-                                client = genai.Client(api_key=api_key_usar)
-                                prompt_completo = f"{system_prompt}\n\nConsulta del usuario: {prompt}"
+                        if GENAI_AVAILABLE == "new":
+                            client = genai.Client(api_key=api_key_usar)
+                            try:
                                 response = client.models.generate_content(
                                     model="gemini-2.5-flash",
                                     contents=prompt_completo
                                 )
-                                texto_respuesta = response.text
-                            else:
-                                genai.configure(api_key=api_key_usar)
+                            except Exception:
+                                # Fallback en caso de que la versión de la API requiera gemini-1.5-flash
+                                response = client.models.generate_content(
+                                    model="gemini-1.5-flash",
+                                    contents=prompt_completo
+                                )
+                            texto_respuesta = response.text
+                        else:
+                            genai.configure(api_key=api_key_usar)
+                            try:
                                 model = genai.GenerativeModel("gemini-2.5-flash")
-                                prompt_completo = f"{system_prompt}\n\nConsulta del usuario: {prompt}"
                                 response = model.generate_content(prompt_completo)
-                                texto_respuesta = response.text
+                            except Exception:
+                                model = genai.GenerativeModel("gemini-1.5-flash")
+                                response = model.generate_content(prompt_completo)
+                            texto_respuesta = response.text
 
-                            st.markdown(texto_respuesta)
-                            st.session_state["mensajes_ia"].append({"role": "assistant", "content": texto_respuesta})
+                        st.markdown(texto_respuesta)
+                        st.session_state["mensajes_ia"].append({"role": "assistant", "content": texto_respuesta})
 
-                        except Exception as e:
-                            err_msg = f"Error al comunicar con Google Gemini: {e}"
-                            st.error(err_msg)
+                    except Exception as e:
+                        err_msg = f"Error al comunicar con Google Gemini: {e}"
+                        st.error(err_msg)
 
 hide_streamlit_style = """
             <style>
