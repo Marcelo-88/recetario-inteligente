@@ -1314,24 +1314,32 @@ elif modo_app == "🤖 Asistente IA (Gemini)":
     st.caption("Consulta dudas técnicas sobre recetas, rendimiento de insumos y costos.")
 
     # 1. Obtener API Key de Secrets o entrada manual
-    api_key_secret = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
+    api_key_secret = ""
+    try:
+        if "GEMINI_API_KEY" in st.secrets:
+            api_key_secret = str(st.secrets["GEMINI_API_KEY"]).strip()
+        elif "gemini" in st.secrets and "api_key" in st.secrets["gemini"]:
+            api_key_secret = str(st.secrets["gemini"]["api_key"]).strip()
+    except Exception:
+        api_key_secret = ""
 
     if "gemini_key_manual" not in st.session_state:
         st.session_state["gemini_key_manual"] = ""
 
-    with st.sidebar.expander("🔑 Configuración Gemini API"):
+    with st.sidebar.expander("🔑 Configuración Gemini API", expanded=True):
         if api_key_secret:
             st.success("✅ API Key detectada desde Secrets.")
             api_key_usar = api_key_secret
         else:
             st.info("Ingresa tu Google AI Studio API Key:")
-            api_key_usar = st.text_input(
+            api_key_input = st.text_input(
                 "API Key:",
                 value=st.session_state["gemini_key_manual"],
                 type="password",
                 placeholder="AIzaSy..."
             )
-            st.session_state["gemini_key_manual"] = api_key_usar
+            st.session_state["gemini_key_manual"] = api_key_input.strip()
+            api_key_usar = st.session_state["gemini_key_manual"]
 
     if not api_key_usar:
         st.warning("⚠️ **API Key requerida:** Para utilizar el asistente, ingresa tu API Key de Google Gemini en la barra lateral o en `secrets.toml`.")
@@ -1368,43 +1376,53 @@ elif modo_app == "🤖 Asistente IA (Gemini)":
 
             with st.chat_message("assistant"):
                 with st.spinner("Pensando respuesta..."):
-                    try:
-                        system_prompt = (
-                            "Eres el asistente virtual especializado del Centro de Control de Recetas de Fridolin. "
-                            "Respondes con precisión, tono profesional y amigable. Ayudas en la gestión de materias primas, "
-                            "estructuras de recetas multinivel (N1 sub-recetas, N2 intermedios, N3 productos finales) y costos."
-                        )
-                        prompt_completo = f"{system_prompt}\n\nConsulta del usuario: {prompt}"
+                    texto_respuesta = ""
+                    error_ultimo = None
+                    
+                    # Modelos candidatos en orden de prioridad
+                    modelos_candidatos = [
+                        "gemini-2.0-flash",
+                        "gemini-1.5-flash",
+                        "gemini-1.5-flash-latest",
+                        "gemini-1.5-pro",
+                        "gemini-pro"
+                    ]
 
-                        if GENAI_AVAILABLE == "new":
-                            client = genai.Client(api_key=api_key_usar)
+                    system_prompt = (
+                        "Eres el asistente virtual especializado del Centro de Control de Recetas de Fridolin. "
+                        "Respondes con precisión, tono profesional y amigable. Ayudas en la gestión de materias primas, "
+                        "estructuras de recetas multinivel (N1 sub-recetas, N2 intermedios, N3 productos finales) y costos."
+                    )
+                    prompt_completo = f"{system_prompt}\n\nConsulta del usuario: {prompt}"
+
+                    if GENAI_AVAILABLE == "new":
+                        client = genai.Client(api_key=api_key_usar)
+                        for mod in modelos_candidatos:
                             try:
                                 response = client.models.generate_content(
-                                    model="gemini-2.5-flash",
+                                    model=mod,
                                     contents=prompt_completo
                                 )
-                            except Exception:
-                                # Fallback en caso de que la versión de la API requiera gemini-1.5-flash
-                                response = client.models.generate_content(
-                                    model="gemini-1.5-flash",
-                                    contents=prompt_completo
-                                )
-                            texto_respuesta = response.text
-                        else:
-                            genai.configure(api_key=api_key_usar)
+                                texto_respuesta = response.text
+                                break
+                            except Exception as e_m:
+                                error_ultimo = e_m
+                    else:
+                        genai.configure(api_key=api_key_usar)
+                        for mod in modelos_candidatos:
                             try:
-                                model = genai.GenerativeModel("gemini-2.5-flash")
+                                model = genai.GenerativeModel(mod)
                                 response = model.generate_content(prompt_completo)
-                            except Exception:
-                                model = genai.GenerativeModel("gemini-1.5-flash")
-                                response = model.generate_content(prompt_completo)
-                            texto_respuesta = response.text
+                                texto_respuesta = response.text
+                                break
+                            except Exception as e_m:
+                                error_ultimo = e_m
 
+                    if texto_respuesta:
                         st.markdown(texto_respuesta)
                         st.session_state["mensajes_ia"].append({"role": "assistant", "content": texto_respuesta})
-
-                    except Exception as e:
-                        err_msg = f"Error al comunicar con Google Gemini: {e}"
+                    else:
+                        err_msg = f"Error al comunicar con Google Gemini: {error_ultimo}"
                         st.error(err_msg)
 
 hide_streamlit_style = """
