@@ -81,7 +81,6 @@ st.markdown(CSS_FRIDOLIN, unsafe_allow_html=True)
 # ==========================================
 # 2. CARGA Y FUNCIONES AUXILIARES DE DATOS
 # ==========================================
-# Carga dinámicamente desde Secrets si existe, de lo contrario usa el ID por defecto
 ID_HOJA = st.secrets.get("ID_HOJA", "1Y8Dzxl_1jVCUrceAQVfSc94RNugo2cgRsrHJwXLwmU4")
 
 
@@ -1313,7 +1312,6 @@ elif modo_app == "🤖 Asistente IA (Gemini)":
     st.markdown("## 🤖 Asistente Virtual Fridolin (Google Gemini)")
     st.caption("Consulta inteligente con contexto real de Recetas N1, N2, N3 y Costos.")
 
-    # Carga automática de la API Key desde Streamlit Secrets
     api_key_secret = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
 
     if "gemini_key_manual" not in st.session_state:
@@ -1345,7 +1343,6 @@ elif modo_app == "🤖 Asistente IA (Gemini)":
     elif not GENAI_AVAILABLE:
         st.error("❌ La librería de Google GenAI no está instalada en el entorno Python. Agrega `google-genai` a tu `requirements.txt`.")
     else:
-        # Cargar contexto general sintético del recetario
         @st.cache_data(ttl=60)
         def obtener_resumen_contexto():
             try:
@@ -1393,7 +1390,6 @@ elif modo_app == "🤖 Asistente IA (Gemini)":
 
             with st.chat_message("assistant"):
                 with st.spinner("Procesando consulta con Gemini..."):
-                    # Construir historial para memoria
                     historial_formateado = ""
                     for m in st.session_state["mensajes_ia"][-6:]:
                         r = "Usuario" if m["role"] == "user" else "Asistente"
