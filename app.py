@@ -3,16 +3,14 @@ import re
 import pandas as pd
 import streamlit as st
 
-# Intentar importar la librería de Google AI
-try:
-    from google import genai
-    GENAI_AVAILABLE = "new"
-except ImportError:
-    try:
-        import google.generativeai as genai
-        GENAI_AVAILABLE = "legacy"
-    except ImportError:
-        GENAI_AVAILABLE = False
+# ==========================================
+# 1. CARGA DE SECRETS Y CONFIGURACIÓN
+# ==========================================
+# Carga automática de la API Key de Gemini desde Secrets
+GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "")
+
+# Carga dinámica del ID de Google Sheets desde Secrets (con fallback al ID por defecto)
+ID_HOJA = st.secrets.get("ID_HOJA", "1Y8Dzxl_1jVCUrceAQVfSc94RNugo2cgRsrHJwXLwmU4")
 
 # ==========================================
 # 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS
