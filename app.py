@@ -3,14 +3,16 @@ import re
 import pandas as pd
 import streamlit as st
 
-# ==========================================
-# 1. CARGA DE SECRETS Y CONFIGURACIÓN
-# ==========================================
-# Carga automática de la API Key de Gemini desde Secrets
-GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "")
-
-# Carga dinámica del ID de Google Sheets desde Secrets (con fallback al ID por defecto)
-ID_HOJA = st.secrets.get("ID_HOJA", "1Y8Dzxl_1jVCUrceAQVfSc94RNugo2cgRsrHJwXLwmU4")
+# Intentar importar la librería de Google AI en ámbito global
+try:
+    from google import genai
+    GENAI_AVAILABLE = "new"
+except ImportError:
+    try:
+        import google.generativeai as genai
+        GENAI_AVAILABLE = "legacy"
+    except ImportError:
+        GENAI_AVAILABLE = False
 
 # ==========================================
 # 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS
@@ -79,7 +81,8 @@ st.markdown(CSS_FRIDOLIN, unsafe_allow_html=True)
 # ==========================================
 # 2. CARGA Y FUNCIONES AUXILIARES DE DATOS
 # ==========================================
-ID_HOJA = "1Y8Dzxl_1jVCUrceAQVfSc94RNugo2cgRsrHJwXLwmU4"
+# Carga dinámicamente desde Secrets si existe, de lo contrario usa el ID por defecto
+ID_HOJA = st.secrets.get("ID_HOJA", "1Y8Dzxl_1jVCUrceAQVfSc94RNugo2cgRsrHJwXLwmU4")
 
 
 @st.cache_data(ttl=15)
@@ -1310,6 +1313,7 @@ elif modo_app == "🤖 Asistente IA (Gemini)":
     st.markdown("## 🤖 Asistente Virtual Fridolin (Google Gemini)")
     st.caption("Consulta inteligente con contexto real de Recetas N1, N2, N3 y Costos.")
 
+    # Carga automática de la API Key desde Streamlit Secrets
     api_key_secret = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
 
     if "gemini_key_manual" not in st.session_state:
