@@ -3,7 +3,7 @@ import re
 import pandas as pd
 import streamlit as st
 
-# Intentar importar la librería de Google AI en ámbito global
+# Intentar importar la librería de Google AI en ámbito global (google-genai / google-generativeai)
 try:
     from google import genai
     GENAI_AVAILABLE = "new"
@@ -1340,10 +1340,10 @@ elif modo_app == "🤖 Asistente IA (Gemini)":
             1. Ve a [Google AI Studio](https://aistudio.google.com/).
             2. Inicia sesión con tu cuenta de Google.
             3. Haz clic en **Create API key** y copia la clave generada.
-            4. Pegala en el panel de la izquierda en **Configuración Gemini API**.
+            4. Pégala en el panel de la izquierda en **Configuración Gemini API**.
         """)
     elif not GENAI_AVAILABLE:
-        st.error("❌ La librería de Google GenAI no está instalada en el entorno Python. Agrega `google-genai` o `google-generativeai` a tu `requirements.txt`.")
+        st.error("❌ La librería de Google GenAI no está instalada en el entorno Python. Agrega `google-genai` a tu `requirements.txt`.")
     else:
         # Cargar contexto general sintético del recetario
         @st.cache_data(ttl=60)
@@ -1408,8 +1408,9 @@ elif modo_app == "🤖 Asistente IA (Gemini)":
                         f"Consulta actual: {prompt}"
                     )
 
-                    modelos_probar = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+                    modelos_probar = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
                     texto_respuesta = ""
+                    ultimo_error = ""
 
                     for mod_name in modelos_probar:
                         try:
@@ -1428,11 +1429,12 @@ elif modo_app == "🤖 Asistente IA (Gemini)":
 
                             if texto_respuesta:
                                 break
-                        except Exception:
+                        except Exception as ex:
+                            ultimo_error = str(ex)
                             continue
 
                     if not texto_respuesta:
-                        texto_respuesta = "⚠️ No fue posible obtener respuesta con ninguno de los modelos disponibles (`gemini-2.5-flash`, `gemini-2.0-flash`, `gemini-1.5-flash`). Por favor, verifica tu API Key."
+                        texto_respuesta = f"⚠️ No fue posible obtener respuesta con los modelos configurados.\n\n**Detalle del error:** `{ultimo_error}`\n\nPor favor, verifica la validez de tu API Key."
 
                     st.markdown(texto_respuesta)
                     st.session_state["mensajes_ia"].append({"role": "assistant", "content": texto_respuesta})
